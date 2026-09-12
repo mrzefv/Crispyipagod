@@ -107,6 +107,9 @@ struct GlobeView: View {
                             RoundedRectangle(cornerRadius: 6).fill(Color.mint.opacity(0.22)).frame(width: 26, height: 20)
                             Image(systemName: "video.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(.mint)
                         }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Public camera")
+                        .accessibilityValue("\(cam.name), \(cam.city)")
                         .contentShape(Rectangle())
                         .onTapGesture { s.select(Entity.from(cam)) }
                     }
@@ -146,9 +149,13 @@ struct GlobeView: View {
                 LinearGradient(colors: [.orange.opacity(0.22), .red.opacity(0.15), .clear], startPoint: .top, endPoint: .bottom)
                     .blendMode(.screen).ignoresSafeArea().allowsHitTesting(false)
             case .crt:
-                VStack(spacing: 3) {
-                    ForEach(0..<180, id: \.self) { _ in
-                        Rectangle().fill(.green.opacity(0.035)).frame(height: 1)
+                Canvas { context, size in
+                    let lineHeight: CGFloat = 4
+                    var y: CGFloat = 0
+                    while y < size.height {
+                        let rect = CGRect(x: 0, y: y, width: size.width, height: 1)
+                        context.fill(Path(rect), with: .color(.green.opacity(0.05)))
+                        y += lineHeight
                     }
                 }
                 .opacity(0.45)

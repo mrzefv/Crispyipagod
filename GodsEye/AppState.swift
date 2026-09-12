@@ -417,7 +417,7 @@ final class AppState: ObservableObject {
     func applyMission(_ m: MissionPreset) {
         switch m {
         case .liveContacts:
-            layers.formUnion([.flights, .military, .satellites, .cameras])
+            layers = [.flights, .military, .satellites, .cameras]
             showTraffic = true
             if let c = nearbyContacts.first ?? contacts.first { select(Entity.from(c)) }
         case .space:
@@ -456,6 +456,7 @@ final class AppState: ObservableObject {
     func handleDeepLink(_ url: URL) {
         guard let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
               url.scheme == "godseye",
+              comps.host == "view",
               let q = comps.queryItems else { return }
         func qv(_ name: String) -> String? { q.first(where: { $0.name == name })?.value }
         if let csv = qv("layers") {
@@ -468,6 +469,27 @@ final class AppState: ObservableObject {
            let lo = qv("lon").flatMap(Double.init),
            let dist = qv("dist").flatMap(Double.init) {
             fly(to: .init(latitude: la, longitude: lo), distance: max(3_000, min(dist, AppState.globeDistance)))
+        }
+        if let sel = qv("sel") {
+            if sel.hasPrefix("ac-"),
+               let c = (contacts + militaryContacts).first(where: { "ac-\($0.id)" == sel }) {
+                selected = Entity.from(c)
+                return
+            }
+            if sel.hasPrefix("sat-"),
+               let sat = satellites.first(where: { "sat-\($0.id)" == sel }) {
+                selected = Entity.from(sat)
+                return
+            }
+            if sel.hasPrefix("ll-"),
+               let l = launches.first(where: { "ll-\($0.id)" == sel }) {
+                selected = Entity.from(l)
+                return
+            }
+            if let cam = cameras.first(where: { $0.id == sel }) {
+                selected = Entity.from(cam)
+                return
+            }
         }
         if let title = qv("title"),
            let la = qv("slat").flatMap(Double.init),
