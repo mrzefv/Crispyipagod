@@ -38,6 +38,22 @@ enum CesiumConfig {
     static let osmBuildingsAsset = 96188       // Cesium OSM Buildings
 }
 
+// MARK: - Hand-rolled tiles catalog (godseye-tiles)
+
+struct TilesCatalog: Decodable, Equatable {
+    struct Raster: Decodable, Equatable, Identifiable { let id: String; let name: String; let url: String; let minZoom: Int; let maxZoom: Int; let bbox: [Double]; let credit: String? }
+    struct Tileset: Decodable, Equatable, Identifiable { let id: String; let name: String; let url: String; let bbox: [Double]; let credit: String? }
+    var rasters: [Raster] = []
+    var tilesets: [Tileset] = []
+
+    static func load(_ url: String) async -> TilesCatalog? {
+        guard let u = URL(string: url), !url.isEmpty else { return nil }
+        var req = URLRequest(url: u); req.cachePolicy = .reloadIgnoringLocalCacheData
+        guard let res = try? await URLSession.shared.data(for: req) else { return nil }
+        return try? JSONDecoder().decode(TilesCatalog.self, from: res.0)
+    }
+}
+
 // MARK: - View
 
 struct Scene3DView: View {
@@ -49,6 +65,8 @@ struct Scene3DView: View {
     @State private var lastCam: (lat: Double, lon: Double, h: Double, heading: Double, pitch: Double)?
     @State private var bridge = CesiumBridge()
     @State private var pushTimer: Timer?
+    @State private var catalog = TilesCatalog()
+    @State private var customRaster: String? = nil   // id of active hand-rolled raster (nil = built-in basemap)
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -66,6 +84,7 @@ struct Scene3DView: View {
                                 Button {
                                     if b.needsIon && s.ionToken.isEmpty && CesiumConfig.defaultIonToken.isEmpty { status = "\(b.title) needs a Cesium ion token (Settings → 3D Scene)"; return }
                                     s.basemap = b
+                                    customRaster = nil
                                     bridge.eval("GE.setBasemap('\(b.rawValue)')")
                                 } label: {
                                     HStack(spacing: 5) {
@@ -78,9 +97,30 @@ struct Scene3DView: View {
                                 }
                                 .buttonStyle(.plain)
                             }
+                            ForEach(customRasters, id: \.0) { r in
+                                Button { selectCustomRaster(r.0, url: r.2, minZ: r.3, maxZ: r.4) } label: {
+                                    HStack(spacing: 5) {
+                                        Image(systemName: "square.grid.3x3.fill")
+                                        Text(r.1).font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    }
+                                    .padding(.horizontal, 10).padding(.vertical, 8)
+                                    .foregroundStyle(customRaster == r.0 ? Color.black : Color.primary)
+                                    .background(Capsule().fill(customRaster == r.0 ? AnyShapeStyle(Color.green) : AnyShapeStyle(.ultraThinMaterial)))
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
                     Menu {
+                        if !allTilesets.isEmpty {
+                            Section("Hand-rolled tilesets") {
+                                ForEach(allTilesets, id: \.0) { ts in
+                                    Toggle(isOn: tilesetBinding(ts.0)) { Label(ts.1, systemImage: "cube") }
+                                }
+                            }
+                        }
+                        Button { Task { await reloadCatalog() } } label: { Label("Reload tiles catalog", systemImage: "arrow.triangle.2.circlepath") }
+                        Divider()
                         Toggle(isOn: $s.sceneTerrain) { Label("World Terrain (ion)", systemImage: "mountain.2") }
                         Toggle(isOn: $s.sceneBuildings) { Label("OSM Buildings (ion)", systemImage: "building.2") }
                         Toggle(isOn: $s.sceneEntities) { Label("Live contacts", systemImage: "airplane") }
@@ -130,6 +170,7 @@ struct Scene3DView: View {
             bridge.eval(String(format: "GE.setView(%.6f,%.6f,%.1f,%.2f,%.2f)", s.center.latitude, s.center.longitude, h, s.heading, s.pitch))
             pushEntities()
             pushTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in pushEntities() }
+            Task { await reloadCatalog() }
         case "tap":
             guard let lat = msg["lat"] as? Double, let lon = msg["lon"] as? Double else { return }
             let d = (msg["height"] as? Double) ?? 3000
@@ -151,6 +192,55 @@ struct Scene3DView: View {
             if let id = msg["id"] as? String { pickEntity(id) }
         default: break
         }
+    }
+
+    // MARK: Hand-rolled tiles
+
+    /// (id, title, urlTemplate, minZoom, maxZoom)
+    private var customRasters: [(String, String, String, Int, Int)] {
+        var out = catalog.rasters.map { ($0.id, $0.name, $0.url, $0.minZoom, $0.maxZoom) }
+        let manual = s.customTileURL.trimmingCharacters(in: .whitespaces)
+        if manual.contains("{z}") { out.append(("manual-raster", "Custom raster", manual, 0, 22)) }
+        return out
+    }
+
+    /// (id, title, tileset.json url)
+    private var allTilesets: [(String, String, String)] {
+        var out = catalog.tilesets.map { ($0.id, $0.name, $0.url) }
+        for (i, u) in s.customTilesets.split(separator: ",").map({ $0.trimmingCharacters(in: .whitespaces) }).enumerated() where u.hasPrefix("http") {
+            out.append(("manual-ts-\(i)", "Custom tileset \(i + 1)", u))
+        }
+        return out
+    }
+
+    private func tilesetBinding(_ id: String) -> Binding<Bool> {
+        Binding(get: { s.enabledTilesets.contains(id) }, set: { on in
+            if on { s.enabledTilesets.insert(id) } else { s.enabledTilesets.remove(id) }
+            pushCustomTilesets()
+        })
+    }
+
+    private func selectCustomRaster(_ id: String, url: String, minZ: Int, maxZ: Int) {
+        customRaster = id
+        let esc = url.replacingOccurrences(of: "'", with: "")
+        bridge.eval("GE.setCustomRaster('\(esc)', \(minZ), \(maxZ))")
+        status = "\(id) · tap to inspect"
+    }
+
+    private func pushCustomTilesets() {
+        let urls = allTilesets.filter { s.enabledTilesets.contains($0.0) }.map { $0.2 }
+        guard let d = try? JSONSerialization.data(withJSONObject: urls), let js = String(data: d, encoding: .utf8) else { return }
+        bridge.eval("GE.setCustomTilesets(\(js))")
+    }
+
+    private func reloadCatalog() async {
+        if let c = await TilesCatalog.load(s.tilesCatalogURL) {
+            catalog = c
+            status = "Catalog: \(c.rasters.count) rasters · \(c.tilesets.count) tilesets"
+        } else if !s.tilesCatalogURL.isEmpty {
+            status = "Tiles catalog not reachable yet (run the godseye-tiles workflow)"
+        }
+        pushCustomTilesets()
     }
 
     private func pickEntity(_ id: String) {
@@ -278,6 +368,33 @@ window.GE = (() => {
 
   function esri(layer){ return new Cesium.UrlTemplateImageryProvider({ url: 'https://server.arcgisonline.com/ArcGIS/rest/services/'+layer+'/MapServer/tile/{z}/{y}/{x}', maximumLevel: 19, credit: 'Esri, Maxar, Earthstar Geographics' }); }
   function osm(){ return new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/', credit: '© OpenStreetMap contributors' }); }
+
+  let customTs = new Map();
+  function setCustomRaster(url, minZ, maxZ){
+    if (!viewer) return;
+    const L = viewer.imageryLayers; L.removeAll();
+    if (tileset) { viewer.scene.primitives.remove(tileset); tileset = null; }
+    viewer.scene.globe.show = true;
+    // Esri underneath so the area outside your hand-rolled tiles isn't black.
+    L.addImageryProvider(esri('World_Imagery'));
+    L.addImageryProvider(new Cesium.UrlTemplateImageryProvider({ url, minimumLevel: minZ||0, maximumLevel: maxZ||22, credit: 'hand-rolled · godseye-tiles', hasAlphaChannel: true }));
+    current = 'custom';
+    viewer.scene.requestRender();
+  }
+  async function setCustomTilesets(urls){
+    if (!viewer) return;
+    const want = new Set(urls||[]);
+    for (const [u, t] of customTs) { if (!want.has(u)) { viewer.scene.primitives.remove(t); customTs.delete(u); } }
+    for (const u of want) {
+      if (customTs.has(u)) continue;
+      try {
+        const t = await Cesium.Cesium3DTileset.fromUrl(u, { maximumScreenSpaceError: 8, pointCloudShading: { attenuation: true, maximumAttenuation: 6, eyeDomeLighting: true } });
+        viewer.scene.primitives.add(t); customTs.set(u, t);
+        post({type:'status', text:'Loaded ' + u.split('/').slice(-3, -1).join('/')});
+      } catch(e){ post({type:'status', text:'Tileset failed: ' + (e.message||e)}); }
+    }
+    viewer.scene.requestRender();
+  }
 
   async function setBasemap(name){
     if (!viewer) { cfg.basemap = name; return; }
@@ -419,7 +536,7 @@ window.GE = (() => {
     viewer.scene.requestRender();
   }
 
-  return { init, setBasemap, setTerrain, setBuildings, loadAssets, setView, setData, home, tilt };
+  return { init, setBasemap, setTerrain, setBuildings, loadAssets, setView, setData, home, tilt, setCustomRaster, setCustomTilesets };
 })();
 window.addEventListener('load', () => post({type:'ready'}));
 window.addEventListener('error', (e) => post({type:'status', text: 'JS: ' + e.message}));

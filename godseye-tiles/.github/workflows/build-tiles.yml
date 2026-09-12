@@ -1,0 +1,134 @@
+name: Build tiles
+
+on:
+  workflow_dispatch:
+    inputs:
+      name:
+        description: "Area name (folder, e.g. norwalk)"
+        required: true
+        default: "norwalk"
+      lat:
+        description: "Center latitude"
+        required: true
+        default: "41.2416"
+      lon:
+        description: "Center longitude"
+        required: true
+        default: "-82.6199"
+      radius_km:
+        description: "Half-size of the square area in km (keep <= 3 for z19 raster)"
+        required: true
+        default: "1.5"
+      layers:
+        description: "Which stacks to build"
+        type: choice
+        default: "all"
+        options: [all, naip, lidar, buildings]
+      raster_zoom:
+        description: "Raster zoom range"
+        required: true
+        default: "12-19"
+      max_points:
+        description: "Lidar point cap (millions)"
+        required: true
+        default: "12"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tiles
+  cancel-in-progress: false
+
+jobs:
+  naip:
+    if: ${{ inputs.layers == 'all' || inputs.layers == 'naip' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GDAL + deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gdal-bin python3-gdal
+          pip install --break-system-packages planetary-computer requests
+      - name: Build NAIP XYZ tiles
+        run: python3 scripts/naip.py --name "${{ inputs.name }}" --lat ${{ inputs.lat }} --lon ${{ inputs.lon }} --radius-km ${{ inputs.radius_km }} --zoom "${{ inputs.raster_zoom }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: naip
+          path: site
+          retention-days: 3
+          if-no-files-found: ignore
+
+  lidar:
+    if: ${{ inputs.layers == 'all' || inputs.layers == 'lidar' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install "laspy[lazrs]" planetary-computer requests pyproj numpy py3dtiles
+      - name: Build 3DEP lidar 3D Tiles
+        run: python3 scripts/lidar.py --name "${{ inputs.name }}" --lat ${{ inputs.lat }} --lon ${{ inputs.lon }} --radius-km ${{ inputs.radius_km }} --max-points ${{ inputs.max_points }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lidar
+          path: site
+          retention-days: 3
+          if-no-files-found: ignore
+
+  buildings:
+    if: ${{ inputs.layers == 'all' || inputs.layers == 'buildings' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install trimesh shapely numpy requests mapbox-earcut
+      - name: Build OSM buildings 3D Tiles
+        run: python3 scripts/buildings.py --name "${{ inputs.name }}" --lat ${{ inputs.lat }} --lon ${{ inputs.lon }} --radius-km ${{ inputs.radius_km }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: buildings
+          path: site
+          retention-days: 3
+          if-no-files-found: ignore
+
+  publish:
+    needs: [naip, lidar, buildings]
+    if: ${{ always() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull existing site (keeps previously built areas)
+        run: |
+          mkdir -p site
+          if git fetch origin gh-pages:gh-pages 2>/dev/null; then
+            git --work-tree=site checkout gh-pages -- . || true
+            git reset -q
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          path: incoming
+        continue-on-error: true
+      - name: Merge + catalog
+        run: |
+          for d in incoming/*/; do [ -d "$d" ] && cp -R "$d". site/; done
+          python3 scripts/catalog.py --site site --base "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          touch site/.nojekyll
+          du -sh site
+      - name: Push to gh-pages
+        run: |
+          cd site
+          rm -rf .git
+          git init -q
+          git config user.name "tiles-bot"
+          git config user.email "tiles-bot@users.noreply.github.com"
+          git checkout -q -b gh-pages
+          git add -A
+          git commit -q -m "tiles: ${{ inputs.name }} (${{ inputs.layers }}) $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gh-pages

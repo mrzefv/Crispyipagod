@@ -220,6 +220,11 @@ final class AppState: ObservableObject {
     @Published var sceneBuildings: Bool { didSet { ud.set(sceneBuildings, forKey: "sceneBuildings") } }
     @Published var sceneEntities: Bool { didSet { ud.set(sceneEntities, forKey: "sceneEntities") } }
     @Published var sceneLines: Bool { didSet { ud.set(sceneLines, forKey: "sceneLines") } }
+    // Hand-rolled tiles (godseye-tiles repo on GitHub Pages)
+    @Published var tilesCatalogURL: String { didSet { ud.set(tilesCatalogURL, forKey: "tilesCatalogURL") } }
+    @Published var customTileURL: String { didSet { ud.set(customTileURL, forKey: "customTileURL") } }
+    @Published var customTilesets: String { didSet { ud.set(customTilesets, forKey: "customTilesets") } }
+    @Published var enabledTilesets: Set<String> { didSet { ud.set(Array(enabledTilesets), forKey: "enabledTilesets") } }
     @Published var anthropicKey: String { didSet { ud.set(anthropicKey, forKey: "anthropicKey") } }
     @Published var aiModel: String { didSet { ud.set(aiModel, forKey: "aiModel") } }
     @Published var alertMilitary: Bool { didSet { ud.set(alertMilitary, forKey: "alertMil"); if alertMilitary { Alerts.shared.requestPermission() } } }
@@ -261,6 +266,10 @@ final class AppState: ObservableObject {
         sceneBuildings = ud.object(forKey: "sceneBuildings") as? Bool ?? false
         sceneEntities = ud.object(forKey: "sceneEntities") as? Bool ?? true
         sceneLines = ud.object(forKey: "sceneLines") as? Bool ?? true
+        tilesCatalogURL = ud.string(forKey: "tilesCatalogURL") ?? "https://mrzefv.github.io/godseye-tiles/catalog.json"
+        customTileURL = ud.string(forKey: "customTileURL") ?? ""
+        customTilesets = ud.string(forKey: "customTilesets") ?? ""
+        enabledTilesets = Set(ud.stringArray(forKey: "enabledTilesets") ?? [])
         anthropicKey = ud.string(forKey: "anthropicKey") ?? ""
         aiModel = ud.string(forKey: "aiModel") ?? "claude-sonnet-5"
         alertMilitary = ud.bool(forKey: "alertMil")

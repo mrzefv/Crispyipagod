@@ -122,6 +122,14 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    TextField("Catalog URL (godseye-tiles on GitHub Pages)", text: $s.tilesCatalogURL).font(.system(size: 13, design: .monospaced)).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                    TextField("Extra raster template …/{z}/{x}/{y}.png", text: $s.customTileURL).font(.system(size: 13, design: .monospaced)).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                    TextField("Extra tileset.json URLs (comma-separated)", text: $s.customTilesets).font(.system(size: 13, design: .monospaced)).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                } header: { Text("Hand-rolled tiles") } footer: {
+                    Text("Built by the godseye-tiles Actions workflow: NAIP aerial raster, USGS 3DEP lidar point cloud, and OSM extruded buildings, served keyless from GitHub Pages. Every stack in the catalog shows up in the 3D scene as a basemap pill or tileset toggle.")
+                }
+
+                Section {
                     SecureField("NASA FIRMS map key", text: $s.firmsKey).font(.system(.body, design: .monospaced)).textInputAutocapitalization(.never).autocorrectionDisabled()
                     LabeledContent("Fires loaded", value: "\(s.fires.count)")
                 } header: { Text("Power up — Active Fires") } footer: { Text("Free at firms.modaps.eosdis.nasa.gov/api/map_key. VIIRS SNPP, trailing 24h, fetched around the view.") }
