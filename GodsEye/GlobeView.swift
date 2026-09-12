@@ -875,7 +875,9 @@ struct SearchSheet: View {
     @State private var places: [MKMapItem] = []
     @State private var parcels: [ParcelRecord] = []
     @State private var searching = false
+    @State private var parcelSearching = false
     @State private var searchTask: Task<Void, Never>?
+    @State private var parcelTask: Task<Void, Never>?
     @State private var searchGeneration: Int = 0
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
@@ -940,13 +942,22 @@ struct SearchSheet: View {
                         Text("No places yet — try an airport, city, or landmark.").font(.footnote).foregroundStyle(.secondary)
                     }
                 }
-                if !parcels.isEmpty {
-                    Section("Address / owner records") {
+                if !parcels.isEmpty || trimmedQuery.count >= 3 || parcelSearching {
+                    Section(parcelSearching ? "Address / owner records…" : "Address / owner records") {
                         ForEach(parcels) { p in
                             Button { pickParcel(p) } label: {
                                 row(icon: "building.2.crop.circle", color: .teal,
                                     title: p.title,
                                     sub: [p.owner.map { "Owner: \($0)" }, p.address].compactMap { $0 }.joined(separator: " · "))
+                            }
+                        }
+                        if parcels.isEmpty {
+                            if parcelSearching {
+                                Text("Looking up parcel records…").font(.footnote).foregroundStyle(.secondary)
+                            } else {
+                                Text("No address/owner records near this map area yet — try moving the map or refining the query.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -973,44 +984,77 @@ struct SearchSheet: View {
 
     private func schedule(_ q: String) {
         searchTask?.cancel()
+        searchTask = nil
+        parcelTask?.cancel()
+        parcelTask = nil
         searchGeneration += 1
         let generation = searchGeneration
         let trimmed = q.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count >= 2 else { places = []; parcels = []; searching = false; return }
+        guard trimmed.count >= 2 else { places = []; parcels = []; searching = false; parcelSearching = false; return }
         let originCenter = s.center
         searching = true
+        if trimmed.count >= 3 {
+            parcelSearching = true
+            parcelTask = Task {
+                func finish() async {
+                    await MainActor.run {
+                        if searchGeneration == generation {
+                            parcelSearching = false
+                            parcelTask = nil
+                        }
+                    }
+                }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard !Task.isCancelled else { await finish(); return }
+                let parcel: [ParcelRecord]
+                do {
+                    parcel = try await Feeds.shared.parcelRecords(query: trimmed, near: originCenter)
+                } catch is CancellationError {
+                    await finish()
+                    return
+                } catch {
+                    parcel = []
+                }
+                guard !Task.isCancelled else { await finish(); return }
+                let shouldApply = await MainActor.run { searchGeneration == generation }
+                guard shouldApply else { await finish(); return }
+                await MainActor.run {
+                    parcels = Array(parcel.prefix(10))
+                    parcelSearching = false
+                    parcelTask = nil
+                }
+            }
+        } else {
+            parcels = []
+            parcelSearching = false
+            parcelTask = nil
+        }
         searchTask = Task {
             func finish() async {
                 await MainActor.run {
                     if searchGeneration == generation { searching = false }
                 }
             }
-            try? await Task.sleep(nanoseconds: 350_000_000)
+            try? await Task.sleep(nanoseconds: 220_000_000)
             guard !Task.isCancelled else { await finish(); return }
             let req = MKLocalSearch.Request()
             req.naturalLanguageQuery = trimmed
             req.resultTypes = [.pointOfInterest, .address]
             req.region = MKCoordinateRegion(center: originCenter, span: MKCoordinateSpan(latitudeDelta: 60, longitudeDelta: 60))
             var resp: MKLocalSearch.Response?
-            let parcel: [ParcelRecord]
             do {
-                async let placeResp = MKLocalSearch(request: req).start()
-                async let parcelResp = Feeds.shared.parcelRecords(query: trimmed, near: originCenter)
-                resp = try await placeResp
-                parcel = try await parcelResp
+                resp = try await MKLocalSearch(request: req).start()
             } catch is CancellationError {
                 await finish()
                 return
             } catch {
                 resp = nil
-                parcel = []
             }
             guard !Task.isCancelled else { await finish(); return }
             let shouldApply = await MainActor.run { searchGeneration == generation }
             guard shouldApply else { await finish(); return }
             await MainActor.run {
                 places = Array((resp?.mapItems ?? []).prefix(12))
-                parcels = Array(parcel.prefix(10))
                 searching = false
             }
         }
