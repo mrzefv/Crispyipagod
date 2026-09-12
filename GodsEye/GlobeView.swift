@@ -154,16 +154,8 @@ struct GlobeView: View {
                 LinearGradient(colors: [.orange.opacity(0.22), .red.opacity(0.15), .clear], startPoint: .top, endPoint: .bottom)
                     .blendMode(.screen).ignoresSafeArea().allowsHitTesting(false)
             case .crt:
-                Canvas { context, size in
-                    let lineHeight: CGFloat = 4
-                    var y: CGFloat = 0
-                    while y < size.height {
-                        let rect = CGRect(x: 0, y: y, width: size.width, height: 1)
-                        context.fill(Path(rect), with: .color(.green.opacity(0.05)))
-                        y += lineHeight
-                    }
-                }
-                .opacity(0.45)
+                LinearGradient(colors: [.green.opacity(0.12), .clear, .green.opacity(0.08), .clear], startPoint: .top, endPoint: .bottom)
+                .opacity(0.38)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
             case .noir:

@@ -63,8 +63,8 @@ final class AppState: ObservableObject {
     @Published var performanceMode: Bool { didSet { ud.set(performanceMode, forKey: "perf"); rebuildDisplay() } }
     @Published var offlineMode: Bool { didSet { ud.set(offlineMode, forKey: "offline"); Feeds.shared.offline = offlineMode } }
     @Published var showLabels: Bool { didSet { ud.set(showLabels, forKey: "labels") } }
-    @Published var showTraffic: Bool { didSet { ud.set(showTraffic, forKey: "traffic") } }
-    @Published var sensorStyleRaw: String { didSet { ud.set(sensorStyleRaw, forKey: "sensorStyle") } }
+    @Published var showTraffic: Bool { didSet { ud.set(showTraffic, forKey: "traffic"); rebuildDisplay() } }
+    @Published var sensorStyleRaw: String { didSet { ud.set(sensorStyleRaw, forKey: "sensorStyle"); rebuildDisplay() } }
     @Published var detectionOverlay: Bool { didSet { ud.set(detectionOverlay, forKey: "detectionOverlay") } }
     @Published var tacticalHUD: Bool { didSet { ud.set(tacticalHUD, forKey: "tacticalHUD") } }
     @Published var cacheBytes: Int64 = FeedCache.size()
@@ -461,6 +461,12 @@ final class AppState: ObservableObject {
             layers = [.quakes, .cameras]
             showTraffic = false
             if let q = quakes.first { select(Entity.from(q)) }
+        }
+        Task {
+            if layers.contains(.satellites) { await refreshSatellites() }
+            if layers.contains(.launches) { await refreshLaunches() }
+            if layers.contains(.military) { await refreshMilitary() }
+            if layers.contains(.flights) { await refreshContacts(force: true) }
         }
     }
 
