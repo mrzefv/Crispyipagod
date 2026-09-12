@@ -40,7 +40,6 @@ final class AppState: ObservableObject {
     @Published var layers: Set<Layer> {
         didSet {
             ud.set(layers.map(\.rawValue), forKey: "layers")
-            if !layers.contains(.residential) { residentialBlueprints = [] }
             rebuildDisplay()
             if layers.contains(.military) && militaryContacts.isEmpty { Task { await refreshMilitary() } }
             if layers.contains(.satellites) && propagators.isEmpty { Task { await refreshSatellites() } }
@@ -63,7 +62,7 @@ final class AppState: ObservableObject {
             if layers.contains(.space) { Task { await refreshSpace() } }
             if layers.contains(.scanner) && scanners.isEmpty { Task { await refreshScanners() } }
             if layers.contains(.peaks) { Task { await refreshPeaks() } }
-            if layers.contains(.residential), distance < 8_000 { Task { await refreshResidentialBlueprints() } }
+            handleResidentialLayerChange()
         }
     }
     @Published var contacts: [Contact] = [] { didSet { rebuildDisplay(); trackTick(fromPoll: true) } }
@@ -265,6 +264,15 @@ final class AppState: ObservableObject {
         ais.onStatus = { [weak self] st in self?.aisStatus = st }
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
         cctv.cameraLookup = { [weak self] id in self?.cameras.first { $0.id == id } }
+    }
+
+    private func handleResidentialLayerChange() {
+        guard layers.contains(.residential) else {
+            residentialBlueprints = []
+            return
+        }
+        guard distance < 8_000 else { return }
+        Task { await refreshResidentialBlueprints() }
     }
 
     func neighborCamera(of cam: Camera, forward: Bool) -> Camera? {
