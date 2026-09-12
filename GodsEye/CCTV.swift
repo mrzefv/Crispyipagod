@@ -91,11 +91,13 @@ final class CamRecorder {
         captureToken = token
         captureTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.captureWatched()
-            if self.captureToken == token {
-                self.captureTask = nil
-                self.captureToken = nil
+            defer {
+                if self.captureToken == token {
+                    self.captureTask = nil
+                    self.captureToken = nil
+                }
             }
+            await self.captureWatched()
         }
     }
 

@@ -24,10 +24,19 @@ final class VoiceController: ObservableObject {
         SFSpeechRecognizer.requestAuthorization { [weak self] auth in
             Task { @MainActor in
                 guard auth == .authorized else { self?.lastCommand = "Speech permission denied"; return }
-                AVAudioApplication.requestRecordPermission { ok in
-                    Task { @MainActor in
-                        guard ok else { self?.lastCommand = "Microphone permission denied"; return }
-                        self?.begin()
+                if #available(iOS 17.0, *) {
+                    AVAudioApplication.requestRecordPermission { ok in
+                        Task { @MainActor in
+                            guard ok else { self?.lastCommand = "Microphone permission denied"; return }
+                            self?.begin()
+                        }
+                    }
+                } else {
+                    AVAudioSession.sharedInstance().requestRecordPermission { ok in
+                        Task { @MainActor in
+                            guard ok else { self?.lastCommand = "Microphone permission denied"; return }
+                            self?.begin()
+                        }
                     }
                 }
             }
