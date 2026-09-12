@@ -131,7 +131,7 @@ struct SettingsView: View {
 
                 Section {
                     LabeledContent("Cameras loaded", value: "\(s.cameras.count) (\(s.cameras.filter(\.isLiveVideo).count) HLS)")
-                    LabeledContent("Watched cameras", value: "\(s.cctv.watching.count)")
+                    LabeledContent("Watched cameras", value: String(s.cctv.watching.count))
                     LabeledContent("Stored frames", value: "\(s.cctv.frameCounts.values.reduce(0, +)) · \(Fmt.bytes(s.cctv.storageBytes))")
                     Picker("Capture interval", selection: Binding(get: { Int(s.cctv.intervalSeconds) }, set: { s.cctv.intervalSeconds = UInt64($0); s.cctv.start() })) {
                         Text("10s").tag(10); Text("20s").tag(20); Text("30s").tag(30); Text("60s").tag(60)

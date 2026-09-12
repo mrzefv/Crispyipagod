@@ -95,7 +95,9 @@ struct DetailSheet: View {
             HStack(spacing: 8) {
                 ActionChip(icon: cam.isLiveVideo ? "play.tv" : "eye", title: "Live view", active: true) { s.openLive(cam) }
                 ActionChip(icon: s.cctv.watching.contains(cam.id) ? "record.circle.fill" : "record.circle",
-                           title: s.cctv.watching.contains(cam.id) ? "Watching" : "Watch", active: s.cctv.watching.contains(cam.id)) { s.cctv.toggleWatch(cam.id) }
+                           title: s.cctv.watching.contains(cam.id) ? "Watching" : "Watch",
+                           active: s.cctv.watching.contains(cam.id),
+                           action: { s.cctv.toggleWatch(cam.id) })
                 ActionChip(icon: "film.stack", title: "\(s.cctv.frameCounts[cam.id] ?? 0) frames", active: false) { s.openLive(cam) }
             }
         }

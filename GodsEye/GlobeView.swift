@@ -121,431 +121,9 @@ struct GlobeView: View {
     private var mapLayer: some View {
         MapReader { proxy in
             Map(position: $s.camera, interactionModes: .all) {
-                // Trails
-                if s.trail.count > 1 {
-                    MapPolyline(coordinates: s.trail)
-                        .stroke(s.trackedEntity?.kind.color ?? s.accent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-                }
-                if s.satTrack.count > 1 {
-                    MapPolyline(coordinates: s.satTrack)
-                        .stroke(Color.cyan.opacity(0.55), style: StrokeStyle(lineWidth: 1.5, dash: [6, 6]))
-                }
-
-                // Aircraft
-                if s.layers.contains(.flights) || s.layers.contains(.military) {
-                    ForEach(s.visibleContacts) { c in
-                        Annotation(c.displayName, coordinate: c.coord, anchor: .center) {
-                            MarkerGlyph(system: c.glyph,
-                                        color: c.military ? .orange : s.accent,
-                                        size: c.aircraftClass == .heavy ? 15 : 11,
-                                        rotation: c.glyph == "airplane" ? c.track - 90 : (c.glyph == "paperplane.fill" ? c.track - 45 : c.track),
-                                        id: c.id.uppercased(),
-                                        tracked: s.trackedID == "ac-\(c.id)",
-                                        detection: s.detection)
-                                .onTapGesture { s.select(Entity.from(c)) }
-                        }
-                        .annotationTitles(showContactLabels ? .visible : .hidden)
-                    }
-                }
-
-                // Tracked target (dead-reckoned position)
-                if let tc = s.trackedCoord, let te = s.trackedEntity, te.kind == .aircraft || te.kind == .military {
-                    Annotation("", coordinate: tc, anchor: .center) {
-                        Image(systemName: "scope")
-                            .font(.system(size: 30, weight: .thin))
-                            .foregroundStyle(te.kind.color)
-                    }
-                    .annotationTitles(.hidden)
-                }
-
-                // Ships
-                ForEach(s.visibleShips) { v in
-                    Annotation(v.displayName, coordinate: v.coord, anchor: .center) {
-                        MarkerGlyph(system: "arrowtriangle.up.fill", color: .blue, size: 11,
-                                    rotation: v.cog, id: v.id, tracked: s.trackedID == "sh-\(v.id)", detection: s.detection)
-                            .onTapGesture { s.select(Entity.from(v)) }
-                    }
-                    .annotationTitles(s.showLabels && s.distance < 120_000 ? .visible : .hidden)
-                }
-
-                // Satellites
-                ForEach(s.visibleSatellites) { sat in
-                    Annotation(sat.name, coordinate: sat.coord, anchor: .center) {
-                        ZStack {
-                            if sat.cls == .station {
-                                Circle().stroke(Color.cyan.opacity(0.5), lineWidth: 1).frame(width: 30, height: 30)
-                            }
-                            Image(systemName: sat.cls == .station ? "sparkle" : "circle.fill")
-                                .font(.system(size: sat.cls == .station ? 14 : 5, weight: .bold))
-                                .foregroundStyle(sat.cls.color)
-                        }
-                        .frame(width: 30, height: 30)
-                        .contentShape(Rectangle())
-                        .overlay { if s.detection { DetectionBox(id: sat.id, color: sat.cls.color) } }
-                        .onTapGesture { s.select(Entity.from(sat)) }
-                    }
-                    .annotationTitles(s.showLabels && (sat.cls == .station || s.distance < 4_000_000) ? .visible : .hidden)
-                }
-
-                // Earthquakes
-                ForEach(s.visibleQuakes) { q in
-                    Annotation(String(format: "M%.1f", q.mag), coordinate: q.coord, anchor: .center) {
-                        ZStack {
-                            Circle().fill(q.color.opacity(0.22)).frame(width: quakeSize(q) * 2, height: quakeSize(q) * 2)
-                            Circle().stroke(q.color, lineWidth: 1.5).frame(width: quakeSize(q), height: quakeSize(q))
-                        }
-                        .frame(width: 28, height: 28)
-                        .contentShape(Rectangle())
-                        .onTapGesture { s.select(Entity.from(q)) }
-                    }
-                    .annotationTitles(q.mag >= 5 && s.showLabels ? .visible : .hidden)
-                }
-
-                // Launch pads
-                ForEach(s.visibleLaunches) { l in
-                    Annotation(l.name, coordinate: l.coord, anchor: .bottom) {
-                        Image(systemName: l.net > Date() ? "flame" : "flame.fill")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.pink)
-                            .frame(width: 28, height: 28)
-                            .contentShape(Rectangle())
-                            .onTapGesture { s.select(Entity.from(l)) }
-                    }
-                    .annotationTitles(.hidden)
-                }
-
-                // CCTV
-                ForEach(s.visibleCameras) { cam in
-                    Annotation(cam.name, coordinate: cam.coord, anchor: .center) {
-                        ZStack {
-                            Circle().fill(Color.purple.opacity(0.25)).frame(width: 22, height: 22)
-                            if s.cctv.watching.contains(cam.id) { Circle().stroke(Color.red, lineWidth: 1.5).frame(width: 22, height: 22) }
-                            Image(systemName: cam.isLiveVideo ? "video.fill" : "video").font(.system(size: 9, weight: .bold)).foregroundStyle(.purple)
-                        }
-                        .frame(width: 26, height: 26)
-                        .contentShape(Rectangle())
-                        .onTapGesture { s.select(Entity.from(cam)) }
-                    }
-                    .annotationTitles(.hidden)
-                }
-
-                // Voice / manual annotations
-                ForEach(s.annotations) { a in
-                    Annotation(a.label, coordinate: a.coord, anchor: .bottom) {
-                        VStack(spacing: 2) {
-                            Text(a.label)
-                                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                .padding(.horizontal, 6).padding(.vertical, 3)
-                                .background(RoundedRectangle(cornerRadius: 4).fill(s.accent))
-                                .foregroundStyle(.black)
-                            Image(systemName: "mappin").foregroundStyle(s.accent)
-                        }
-                    }
-                    .annotationTitles(.hidden)
-                }
-
-                // Historical trace of tracked aircraft
-                if s.traceHistory.count > 1 {
-                    MapPolyline(coordinates: s.traceHistory)
-                        .stroke(Color.orange.opacity(0.6), style: StrokeStyle(lineWidth: 1.5))
-                }
-
-                // Wakes (short trailing lines behind moving contacts)
-                if s.wakes, s.distance < 800_000 {
-                    ForEach(s.visibleContacts) { c in
-                        if let gs = c.groundSpeedKt, gs > 40 {
-                            MapPolyline(coordinates: [c.coord, c.coord.moved(meters: -gs * 0.514 * 90, bearing: c.track)])
-                                .stroke((c.military ? Color.orange : s.accent).opacity(0.45), lineWidth: 1.5)
-                        }
-                    }
-                    ForEach(s.visibleShips) { v in
-                        if v.sogKt > 1 {
-                            MapPolyline(coordinates: [v.coord, v.coord.moved(meters: -v.sogKt * 0.514 * 600, bearing: v.cog)])
-                                .stroke(Color.blue.opacity(0.45), lineWidth: 1.5)
-                        }
-                    }
-                }
-
-                // Fires
-                ForEach(s.visibleFires) { f in
-                    Annotation("", coordinate: f.coord, anchor: .center) {
-                        Circle().fill(Entity.Kind.fire.color.opacity(0.75))
-                            .frame(width: min(4 + f.frp / 8, 16), height: min(4 + f.frp / 8, 16))
-                            .frame(width: 20, height: 20).contentShape(Rectangle())
-                            .onTapGesture { s.select(Entity.from(f)) }
-                    }
-                    .annotationTitles(.hidden)
-                }
-
-                // Bikeshare
-                ForEach(s.visibleBikes) { b in
-                    Annotation(b.name, coordinate: b.coord, anchor: .center) {
-                        ZStack {
-                            Circle().fill(Color.mint.opacity(0.25)).frame(width: 20, height: 20)
-                            Text(b.bikes >= 0 ? "\(b.bikes)" : "?").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(.mint)
-                        }
-                        .frame(width: 24, height: 24).contentShape(Rectangle())
-                        .onTapGesture { s.select(Entity.from(b)) }
-                    }
-                    .annotationTitles(.hidden)
-                }
-
-                // Radio
-                ForEach(s.visibleRadio) { r in
-                    Annotation(r.name, coordinate: r.coord, anchor: .center) {
-                        Image(systemName: s.radio.current?.id == r.id ? "dot.radiowaves.left.and.right" : "radio")
-                            .font(.system(size: 10, weight: .bold)).foregroundStyle(.yellow)
-                            .frame(width: 22, height: 22).contentShape(Rectangle())
-                            .onTapGesture { s.select(Entity.from(r)) }
-                    }
-                    .annotationTitles(.hidden)
-                }
-
-                // Infrastructure
-                if s.layers.contains(.infra), s.distance < 400_000 {
-                    ForEach(s.infra) { n in
-                        Annotation(n.name, coordinate: n.coord, anchor: .center) {
-                            Image(systemName: n.kind.icon).font(.system(size: 10, weight: .bold)).foregroundStyle(.teal)
-                                .frame(width: 22, height: 22).contentShape(Rectangle())
-                                .onTapGesture { s.select(Entity.from(n)) }
-                        }
-                        .annotationTitles(s.distance < 30_000 && s.showLabels ? .visible : .hidden)
-                    }
-                }
-
-                // Airport surfaces
-                if s.layers.contains(.airport) {
-                    ForEach(s.airportFeatures) { f in
-                        switch f.kind {
-                        case .runway: MapPolyline(coordinates: f.points).stroke(Color.white.opacity(0.85), lineWidth: 5)
-                        case .taxiway: MapPolyline(coordinates: f.points).stroke(Color.yellow.opacity(0.7), lineWidth: 2)
-                        case .apron: MapPolygon(coordinates: f.points).foregroundStyle(Color.gray.opacity(0.18)).stroke(Color.gray.opacity(0.5), lineWidth: 1)
-                        case .terminal: MapPolygon(coordinates: f.points).foregroundStyle(Color.cyan.opacity(0.15)).stroke(Color.cyan.opacity(0.6), lineWidth: 1)
-                        }
-                    }
-                }
-
-                // Submarine cables
-                ForEach(s.visibleCables) { cable in
-                    ForEach(Array(cable.segments.enumerated()), id: \.offset) { seg in
-                        MapPolyline(coordinates: seg.element)
-                            .stroke(Color(hex: cable.color).opacity(0.8), lineWidth: 1.5)
-                    }
-                }
-
-                // Camera viewsheds
-                if s.viewsheds, s.layers.contains(.cctv), s.distance < 6_000 {
-                    ForEach(s.visibleCameras) { cam in
-                        MapPolygon(coordinates: Geo.cone(at: cam.coord, heading: Geo.stableHeading(for: cam.id)))
-                            .foregroundStyle(Color.purple.opacity(0.18))
-                            .stroke(Color.purple.opacity(0.6), lineWidth: 1)
-                    }
-                }
-
-                // Region outlines
-                ForEach(s.regions) { r in
-                    ForEach(Array(r.rings.enumerated()), id: \.offset) { ring in
-                        MapPolygon(coordinates: ring.element)
-                            .foregroundStyle(s.accent.opacity(0.10))
-                            .stroke(s.accent, lineWidth: 2)
-                    }
-                }
-
-                // Measure
-                if s.measureLine.count > 1 {
-                    MapPolyline(coordinates: s.measureLine).stroke(Color.white, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
-                }
-                if let a = s.measureA {
-                    Annotation("A", coordinate: a, anchor: .center) { Image(systemName: "a.circle.fill").font(.title3).foregroundStyle(.white) }
-                }
-                if let b = s.measureB, let a = s.measureA {
-                    Annotation("B", coordinate: b, anchor: .center) { Image(systemName: "b.circle.fill").font(.title3).foregroundStyle(.white) }
-                    Annotation("", coordinate: Geo.greatCircle(a, b, points: 2)[1], anchor: .bottom) {
-                        Text(String(format: "%.1f km", a.distance(to: b) / 1000))
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .padding(.horizontal, 6).padding(.vertical, 3)
-                            .background(RoundedRectangle(cornerRadius: 4).fill(Color.black.opacity(0.7)))
-                    }
-                    .annotationTitles(.hidden)
-                }
-
-                // Launch replay
-                if let r = s.replay {
-                    let st = r.state(at: s.replayT)
-                    MapPolyline(coordinates: r.track(upTo: s.replayT)).stroke(Color.pink, lineWidth: 3)
-                    MapPolyline(coordinates: r.track(upTo: LaunchReplay.duration)).stroke(Color.pink.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [4, 6]))
-                    Annotation("", coordinate: st.coord, anchor: .center) {
-                        VStack(spacing: 2) {
-                            Image(systemName: "paperplane.fill").rotationEffect(.degrees(r.azimuth - 45)).foregroundStyle(.pink).font(.title3)
-                            Text("\(st.phase) · \(Int(st.altKm)) km").font(.system(size: 9, weight: .bold, design: .monospaced))
-                                .padding(.horizontal, 4).background(Color.black.opacity(0.7))
-                        }
-                    }
-                    .annotationTitles(.hidden)
-                }
-
-                // Night side + aurora
-                if s.layers.contains(.space) {
-                    if s.night.count > 3 {
-                        MapPolygon(coordinates: s.night).foregroundStyle(Color.black.opacity(0.35)).stroke(Color.yellow.opacity(0.5), lineWidth: 1)
-                    }
-                    ForEach(s.auroraPoints) { a in
-                        Annotation("", coordinate: a.coord, anchor: .center) {
-                            Circle().fill(Color.green.opacity(min(0.85, a.prob / 100 + 0.15))).frame(width: 6, height: 6)
-                        }
-                        .annotationTitles(.hidden)
-                    }
-                    Annotation("SUN", coordinate: Solar.subsolar(Date()), anchor: .center) {
-                        Image(systemName: "sun.max.fill").foregroundStyle(.yellow).font(.title2)
-                    }
-                    .annotationTitles(.visible)
-                }
-
-                // Wind vectors
-                if s.layers.contains(.wind) {
-                    ForEach(s.winds) { w in
-                        Annotation("", coordinate: w.coord, anchor: .center) {
-                            VStack(spacing: 0) {
-                                Image(systemName: "arrow.up").font(.system(size: 12 + min(w.speedKt, 40) / 4, weight: .bold))
-                                    .rotationEffect(.degrees(w.dirDeg + 180))
-                                    .foregroundStyle(w.speedKt > 25 ? .orange : .cyan)
-                                Text("\(Int(w.speedKt))").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(.cyan)
-                            }
-                        }
-                        .annotationTitles(.hidden)
-                    }
-                }
-
-                // Storm cells
-                ForEach(s.storms) { st in
-                    if st.history.count > 1 { MapPolyline(coordinates: st.history).stroke(Entity.Kind.storm.color, lineWidth: 2) }
-                    MapPolyline(coordinates: [st.coord, st.coord.moved(meters: st.speedKmh / 3.6 * 3600, bearing: st.headingDeg)])
-                        .stroke(Entity.Kind.storm.color.opacity(0.6), style: StrokeStyle(lineWidth: 2, dash: [6, 6]))
-                    Annotation("+60 min", coordinate: st.coord.moved(meters: st.speedKmh / 3.6 * 3600, bearing: st.headingDeg), anchor: .center) {
-                        Circle().stroke(Entity.Kind.storm.color, lineWidth: 1.5).frame(width: 14, height: 14)
-                    }
-                    Annotation("", coordinate: st.coord, anchor: .center) {
-                        Image(systemName: "cloud.bolt.rain.fill").foregroundStyle(Entity.Kind.storm.color).font(.title3)
-                            .frame(width: 30, height: 30).contentShape(Rectangle())
-                            .onTapGesture { s.select(Entity.from(st)) }
-                    }
-                    .annotationTitles(.hidden)
-                }
-
-                // Power grid
-                if s.layers.contains(.power), s.distance < 250_000 {
-                    ForEach(s.powerLines) { l in
-                        MapPolyline(coordinates: l.points).stroke(l.color.opacity(0.8), lineWidth: l.voltage >= 230_000 ? 2.5 : 1.5)
-                    }
-                    ForEach(s.powerNodes) { n in
-                        Annotation(n.name, coordinate: n.coord, anchor: .center) {
-                            Image(systemName: n.kind.icon).font(.system(size: 10, weight: .bold)).foregroundStyle(.yellow)
-                                .frame(width: 22, height: 22).contentShape(Rectangle())
-                                .onTapGesture { s.select(Entity.from(n)) }
-                        }
-                        .annotationTitles(s.distance < 40_000 && s.showLabels ? .visible : .hidden)
-                    }
-                }
-
-                // Rail
-                if s.layers.contains(.rail), s.distance < 150_000 {
-                    ForEach(s.railLines) { l in
-                        MapPolyline(coordinates: l.points)
-                            .stroke(l.kind == "yard" ? Color.gray : l.kind == "subway" ? Color.orange : l.kind == "tram" || l.kind == "light_rail" ? Color.mint : Entity.Kind.train.color,
-                                    style: StrokeStyle(lineWidth: l.kind == "yard" ? 1 : 2, dash: l.kind == "rail" ? [] : [4, 3]))
-                    }
-                    ForEach(s.railStations) { st in
-                        Annotation(st.name, coordinate: st.coord, anchor: .center) {
-                            Circle().fill(.white).frame(width: 6, height: 6).overlay(Circle().stroke(Entity.Kind.train.color, lineWidth: 1.5)).frame(width: 18, height: 18).contentShape(Rectangle())
-                                .onTapGesture { s.select(Entity.place(lat: st.lat, lon: st.lon, name: st.name, detail: "Rail \(st.kind)", distance: 3_000)) }
-                        }
-                        .annotationTitles(s.distance < 25_000 && s.showLabels ? .visible : .hidden)
-                    }
-                }
-
-                // Live trains
-                ForEach(s.visibleTrains) { t in
-                    Annotation(t.name, coordinate: t.coord, anchor: .center) {
-                        MarkerGlyph(system: "train.side.front.car", color: Entity.Kind.train.color, size: 12, rotation: 0, id: t.id, tracked: s.trackedID == "train-\(t.id)", detection: s.detection)
-                            .onTapGesture { s.select(Entity.from(t)) }
-                    }
-                    .annotationTitles(s.distance < 600_000 && s.showLabels ? .visible : .hidden)
-                }
-
-                // Airports
-                ForEach(s.visibleAirports) { a in
-                    Annotation(a.iata.isEmpty ? a.id : a.iata, coordinate: a.coord, anchor: .center) {
-                        Image(systemName: "airplane.circle").font(.system(size: a.type == "large_airport" ? 14 : 10)).foregroundStyle(Entity.Kind.airport.color)
-                            .frame(width: 24, height: 24).contentShape(Rectangle())
-                            .onTapGesture { s.select(Entity.from(a)) }
-                    }
-                    .annotationTitles(s.showLabels && (a.type == "large_airport" || s.distance < 800_000) ? .visible : .hidden)
-                }
-
-                // Weather stations
-                ForEach(s.visibleStations) { w in
-                    Annotation(w.tempC.map { "\(Int($0))°" } ?? w.id, coordinate: w.coord, anchor: .center) {
-                        ZStack {
-                            Circle().fill(Entity.Kind.station.color.opacity(0.2)).frame(width: 18, height: 18)
-                            if let d = w.windDir, let k = w.windKt, k > 0 {
-                                Image(systemName: "arrow.up").font(.system(size: 9, weight: .bold)).rotationEffect(.degrees(d + 180)).foregroundStyle(Entity.Kind.station.color)
-                            } else {
-                                Image(systemName: w.kind == "BUOY" ? "water.waves" : "thermometer.medium").font(.system(size: 8)).foregroundStyle(Entity.Kind.station.color)
-                            }
-                        }
-                        .frame(width: 24, height: 24).contentShape(Rectangle())
-                        .onTapGesture { s.select(Entity.from(w)) }
-                    }
-                    .annotationTitles(s.showLabels && s.distance < 1_500_000 ? .visible : .hidden)
-                }
-
-                // Hazards
-                ForEach(s.visibleHazards) { h in
-                    ForEach(Array(h.rings.enumerated()), id: \.offset) { ring in
-                        MapPolygon(coordinates: ring.element).foregroundStyle(h.color.opacity(0.18)).stroke(h.color.opacity(0.8), lineWidth: 1.5)
-                    }
-                    Annotation(h.event, coordinate: h.coord, anchor: .center) {
-                        Image(systemName: h.source == "Cal Fire" ? "flame.fill" : "exclamationmark.triangle.fill").font(.system(size: 12)).foregroundStyle(h.color)
-                            .frame(width: 24, height: 24).contentShape(Rectangle())
-                            .onTapGesture { s.select(Entity.from(h)) }
-                    }
-                    .annotationTitles(s.distance < 2_000_000 && s.showLabels ? .visible : .hidden)
-                }
-
-                // Scanners
-                if s.layers.contains(.scanner) {
-                    ForEach(s.scanners) { f in
-                        Annotation(f.title, coordinate: f.coord, anchor: .center) {
-                            Image(systemName: s.scannerNow?.id == f.id ? "speaker.wave.2.fill" : "antenna.radiowaves.left.and.right").font(.system(size: 11, weight: .bold)).foregroundStyle(Entity.Kind.scanner.color)
-                                .frame(width: 24, height: 24).contentShape(Rectangle())
-                                .onTapGesture { s.select(Entity.from(f)) }
-                        }
-                        .annotationTitles(.hidden)
-                    }
-                }
-
-                // Peaks
-                if s.layers.contains(.peaks), s.distance < 300_000 {
-                    ForEach(s.peaks.prefix(120)) { p in
-                        Annotation("\(p.name) \(Int(p.elevationM))m", coordinate: p.coord, anchor: .bottom) {
-                            Image(systemName: "triangle.fill").font(.system(size: 9)).foregroundStyle(Entity.Kind.peak.color)
-                                .frame(width: 20, height: 20).contentShape(Rectangle())
-                                .onTapGesture { s.select(Entity.from(p)) }
-                        }
-                        .annotationTitles(s.distance < 80_000 && s.showLabels ? .visible : .hidden)
-                    }
-                }
-
-                // Quake depth rings (seismic upgrade)
-                if s.layers.contains(.quakes), s.distance < 3_000_000 {
-                    ForEach(s.visibleQuakes.filter { $0.mag >= 4 }) { q in
-                        MapCircle(center: q.coord, radius: pow(10, 0.5 * q.mag) * 120)
-                            .foregroundStyle((q.depthKm < 70 ? Color.red : q.depthKm < 300 ? Color.orange : Color.blue).opacity(0.12))
-                            .stroke((q.depthKm < 70 ? Color.red : q.depthKm < 300 ? Color.orange : Color.blue).opacity(0.6), lineWidth: 1)
-                    }
-                }
-
-                if s.location.coordinate != nil { UserAnnotation() }
+                primaryMapContent
+                secondaryMapContent
+                tertiaryMapContent
             }
             .mapStyle(s.mapStyle)
             .mapControls { MapCompass() }
@@ -563,6 +141,374 @@ struct GlobeView: View {
             }
         }
         .ignoresSafeArea()
+    }
+
+    @MapContentBuilder private var primaryMapContent: some MapContent {
+        if s.trail.count > 1 {
+            MapPolyline(coordinates: s.trail)
+                .stroke(s.trackedEntity?.kind.color ?? s.accent, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+        }
+        if s.satTrack.count > 1 {
+            MapPolyline(coordinates: s.satTrack)
+                .stroke(Color.cyan.opacity(0.55), style: StrokeStyle(lineWidth: 1.5, dash: [6, 6]))
+        }
+        if s.layers.contains(.flights) || s.layers.contains(.military) {
+            ForEach(s.visibleContacts) { c in
+                Annotation(c.displayName, coordinate: c.coord, anchor: .center) {
+                    MarkerGlyph(system: c.glyph,
+                                color: c.military ? .orange : s.accent,
+                                size: c.aircraftClass == .heavy ? 15 : 11,
+                                rotation: c.glyph == "airplane" ? c.track - 90 : (c.glyph == "paperplane.fill" ? c.track - 45 : c.track),
+                                id: c.id.uppercased(),
+                                tracked: s.trackedID == "ac-\(c.id)",
+                                detection: s.detection)
+                        .onTapGesture { s.select(Entity.from(c)) }
+                }
+                .annotationTitles(showContactLabels ? .visible : .hidden)
+            }
+        }
+        if let tc = s.trackedCoord, let te = s.trackedEntity, te.kind == .aircraft || te.kind == .military {
+            Annotation("", coordinate: tc, anchor: .center) {
+                Image(systemName: "scope")
+                    .font(.system(size: 30, weight: .thin))
+                    .foregroundStyle(te.kind.color)
+            }
+            .annotationTitles(.hidden)
+        }
+        ForEach(s.visibleShips) { v in
+            Annotation(v.displayName, coordinate: v.coord, anchor: .center) {
+                MarkerGlyph(system: "arrowtriangle.up.fill", color: .blue, size: 11,
+                            rotation: v.cog, id: v.id, tracked: s.trackedID == "sh-\(v.id)", detection: s.detection)
+                    .onTapGesture { s.select(Entity.from(v)) }
+            }
+            .annotationTitles(s.showLabels && s.distance < 120_000 ? .visible : .hidden)
+        }
+        ForEach(s.visibleSatellites) { sat in
+            Annotation(sat.name, coordinate: sat.coord, anchor: .center) {
+                ZStack {
+                    if sat.cls == .station {
+                        Circle().stroke(Color.cyan.opacity(0.5), lineWidth: 1).frame(width: 30, height: 30)
+                    }
+                    Image(systemName: sat.cls == .station ? "sparkle" : "circle.fill")
+                        .font(.system(size: sat.cls == .station ? 14 : 5, weight: .bold))
+                        .foregroundStyle(sat.cls.color)
+                }
+                .frame(width: 30, height: 30)
+                .contentShape(Rectangle())
+                .overlay { if s.detection { DetectionBox(id: sat.id, color: sat.cls.color) } }
+                .onTapGesture { s.select(Entity.from(sat)) }
+            }
+            .annotationTitles(s.showLabels && (sat.cls == .station || s.distance < 4_000_000) ? .visible : .hidden)
+        }
+        ForEach(s.visibleQuakes) { q in
+            Annotation(String(format: "M%.1f", q.mag), coordinate: q.coord, anchor: .center) {
+                ZStack {
+                    Circle().fill(q.color.opacity(0.22)).frame(width: quakeSize(q) * 2, height: quakeSize(q) * 2)
+                    Circle().stroke(q.color, lineWidth: 1.5).frame(width: quakeSize(q), height: quakeSize(q))
+                }
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+                .onTapGesture { s.select(Entity.from(q)) }
+            }
+            .annotationTitles(q.mag >= 5 && s.showLabels ? .visible : .hidden)
+        }
+        ForEach(s.visibleLaunches) { l in
+            Annotation(l.name, coordinate: l.coord, anchor: .bottom) {
+                Image(systemName: l.net > Date() ? "flame" : "flame.fill")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(.pink)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+                    .onTapGesture { s.select(Entity.from(l)) }
+            }
+            .annotationTitles(.hidden)
+        }
+        ForEach(s.visibleCameras) { cam in
+            Annotation(cam.name, coordinate: cam.coord, anchor: .center) {
+                ZStack {
+                    Circle().fill(Color.purple.opacity(0.25)).frame(width: 22, height: 22)
+                    if s.cctv.watching.contains(cam.id) { Circle().stroke(Color.red, lineWidth: 1.5).frame(width: 22, height: 22) }
+                    Image(systemName: cam.isLiveVideo ? "video.fill" : "video").font(.system(size: 9, weight: .bold)).foregroundStyle(.purple)
+                }
+                .frame(width: 26, height: 26)
+                .contentShape(Rectangle())
+                .onTapGesture { s.select(Entity.from(cam)) }
+            }
+            .annotationTitles(.hidden)
+        }
+        ForEach(s.annotations) { a in
+            Annotation(a.label, coordinate: a.coord, anchor: .bottom) {
+                VStack(spacing: 2) {
+                    Text(a.label)
+                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .padding(.horizontal, 6).padding(.vertical, 3)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(s.accent))
+                        .foregroundStyle(.black)
+                    Image(systemName: "mappin").foregroundStyle(s.accent)
+                }
+            }
+            .annotationTitles(.hidden)
+        }
+        if s.traceHistory.count > 1 {
+            MapPolyline(coordinates: s.traceHistory)
+                .stroke(Color.orange.opacity(0.6), style: StrokeStyle(lineWidth: 1.5))
+        }
+        if s.wakes, s.distance < 800_000 {
+            ForEach(s.visibleContacts) { c in
+                if let gs = c.groundSpeedKt, gs > 40 {
+                    MapPolyline(coordinates: [c.coord, c.coord.moved(meters: -gs * 0.514 * 90, bearing: c.track)])
+                        .stroke((c.military ? Color.orange : s.accent).opacity(0.45), lineWidth: 1.5)
+                }
+            }
+            ForEach(s.visibleShips) { v in
+                if v.sogKt > 1 {
+                    MapPolyline(coordinates: [v.coord, v.coord.moved(meters: -v.sogKt * 0.514 * 600, bearing: v.cog)])
+                        .stroke(Color.blue.opacity(0.45), lineWidth: 1.5)
+                }
+            }
+        }
+    }
+
+    @MapContentBuilder private var secondaryMapContent: some MapContent {
+        ForEach(s.visibleFires) { f in
+            Annotation("", coordinate: f.coord, anchor: .center) {
+                Circle().fill(Entity.Kind.fire.color.opacity(0.75))
+                    .frame(width: min(4 + f.frp / 8, 16), height: min(4 + f.frp / 8, 16))
+                    .frame(width: 20, height: 20).contentShape(Rectangle())
+                    .onTapGesture { s.select(Entity.from(f)) }
+            }
+            .annotationTitles(.hidden)
+        }
+        ForEach(s.visibleBikes) { b in
+            Annotation(b.name, coordinate: b.coord, anchor: .center) {
+                ZStack {
+                    Circle().fill(Color.mint.opacity(0.25)).frame(width: 20, height: 20)
+                    Text(b.bikes >= 0 ? "\(b.bikes)" : "?").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(.mint)
+                }
+                .frame(width: 24, height: 24).contentShape(Rectangle())
+                .onTapGesture { s.select(Entity.from(b)) }
+            }
+            .annotationTitles(.hidden)
+        }
+        ForEach(s.visibleRadio) { r in
+            Annotation(r.name, coordinate: r.coord, anchor: .center) {
+                Image(systemName: s.radio.current?.id == r.id ? "dot.radiowaves.left.and.right" : "radio")
+                    .font(.system(size: 10, weight: .bold)).foregroundStyle(.yellow)
+                    .frame(width: 22, height: 22).contentShape(Rectangle())
+                    .onTapGesture { s.select(Entity.from(r)) }
+            }
+            .annotationTitles(.hidden)
+        }
+        if s.layers.contains(.infra), s.distance < 400_000 {
+            ForEach(s.infra) { n in
+                Annotation(n.name, coordinate: n.coord, anchor: .center) {
+                    Image(systemName: n.kind.icon).font(.system(size: 10, weight: .bold)).foregroundStyle(.teal)
+                        .frame(width: 22, height: 22).contentShape(Rectangle())
+                        .onTapGesture { s.select(Entity.from(n)) }
+                }
+                .annotationTitles(s.distance < 30_000 && s.showLabels ? .visible : .hidden)
+            }
+        }
+        if s.layers.contains(.airport) {
+            ForEach(s.airportFeatures) { f in
+                switch f.kind {
+                case .runway: MapPolyline(coordinates: f.points).stroke(Color.white.opacity(0.85), lineWidth: 5)
+                case .taxiway: MapPolyline(coordinates: f.points).stroke(Color.yellow.opacity(0.7), lineWidth: 2)
+                case .apron: MapPolygon(coordinates: f.points).foregroundStyle(Color.gray.opacity(0.18)).stroke(Color.gray.opacity(0.5), lineWidth: 1)
+                case .terminal: MapPolygon(coordinates: f.points).foregroundStyle(Color.cyan.opacity(0.15)).stroke(Color.cyan.opacity(0.6), lineWidth: 1)
+                }
+            }
+        }
+        ForEach(s.visibleCables) { cable in
+            ForEach(Array(cable.segments.enumerated()), id: \.offset) { seg in
+                MapPolyline(coordinates: seg.element)
+                    .stroke(Color(hex: cable.color).opacity(0.8), lineWidth: 1.5)
+            }
+        }
+        if s.viewsheds, s.layers.contains(.cctv), s.distance < 6_000 {
+            ForEach(s.visibleCameras) { cam in
+                MapPolygon(coordinates: Geo.cone(at: cam.coord, heading: Geo.stableHeading(for: cam.id)))
+                    .foregroundStyle(Color.purple.opacity(0.18))
+                    .stroke(Color.purple.opacity(0.6), lineWidth: 1)
+            }
+        }
+        ForEach(s.regions) { r in
+            ForEach(Array(r.rings.enumerated()), id: \.offset) { ring in
+                MapPolygon(coordinates: ring.element)
+                    .foregroundStyle(s.accent.opacity(0.10))
+                    .stroke(s.accent, lineWidth: 2)
+            }
+        }
+        if s.measureLine.count > 1 {
+            MapPolyline(coordinates: s.measureLine).stroke(Color.white, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+        }
+        if let a = s.measureA {
+            Annotation("A", coordinate: a, anchor: .center) { Image(systemName: "a.circle.fill").font(.title3).foregroundStyle(.white) }
+        }
+        if let b = s.measureB, let a = s.measureA {
+            Annotation("B", coordinate: b, anchor: .center) { Image(systemName: "b.circle.fill").font(.title3).foregroundStyle(.white) }
+            Annotation("", coordinate: Geo.greatCircle(a, b, points: 2)[1], anchor: .bottom) {
+                Text(String(format: "%.1f km", a.distance(to: b) / 1000))
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.black.opacity(0.7)))
+            }
+            .annotationTitles(.hidden)
+        }
+        if let r = s.replay {
+            let st = r.state(at: s.replayT)
+            MapPolyline(coordinates: r.track(upTo: s.replayT)).stroke(Color.pink, lineWidth: 3)
+            MapPolyline(coordinates: r.track(upTo: LaunchReplay.duration)).stroke(Color.pink.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [4, 6]))
+            Annotation("", coordinate: st.coord, anchor: .center) {
+                VStack(spacing: 2) {
+                    Image(systemName: "paperplane.fill").rotationEffect(.degrees(r.azimuth - 45)).foregroundStyle(.pink).font(.title3)
+                    Text("\(st.phase) · \(Int(st.altKm)) km").font(.system(size: 9, weight: .bold, design: .monospaced))
+                        .padding(.horizontal, 4).background(Color.black.opacity(0.7))
+                }
+            }
+            .annotationTitles(.hidden)
+        }
+        if s.layers.contains(.space) {
+            if s.night.count > 3 {
+                MapPolygon(coordinates: s.night).foregroundStyle(Color.black.opacity(0.35)).stroke(Color.yellow.opacity(0.5), lineWidth: 1)
+            }
+            ForEach(s.auroraPoints) { a in
+                Annotation("", coordinate: a.coord, anchor: .center) {
+                    Circle().fill(Color.green.opacity(min(0.85, a.prob / 100 + 0.15))).frame(width: 6, height: 6)
+                }
+                .annotationTitles(.hidden)
+            }
+            Annotation("SUN", coordinate: Solar.subsolar(Date()), anchor: .center) {
+                Image(systemName: "sun.max.fill").foregroundStyle(.yellow).font(.title2)
+            }
+            .annotationTitles(.visible)
+        }
+        if s.layers.contains(.wind) {
+            ForEach(s.winds) { w in
+                Annotation("", coordinate: w.coord, anchor: .center) {
+                    VStack(spacing: 0) {
+                        Image(systemName: "arrow.up").font(.system(size: 12 + min(w.speedKt, 40) / 4, weight: .bold))
+                            .rotationEffect(.degrees(w.dirDeg + 180))
+                            .foregroundStyle(w.speedKt > 25 ? .orange : .cyan)
+                        Text("\(Int(w.speedKt))").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(.cyan)
+                    }
+                }
+                .annotationTitles(.hidden)
+            }
+        }
+    }
+
+    @MapContentBuilder private var tertiaryMapContent: some MapContent {
+        ForEach(s.storms) { st in
+            if st.history.count > 1 { MapPolyline(coordinates: st.history).stroke(Entity.Kind.storm.color, lineWidth: 2) }
+            MapPolyline(coordinates: [st.coord, st.coord.moved(meters: st.speedKmh / 3.6 * 3600, bearing: st.headingDeg)])
+                .stroke(Entity.Kind.storm.color.opacity(0.6), style: StrokeStyle(lineWidth: 2, dash: [6, 6]))
+            Annotation("+60 min", coordinate: st.coord.moved(meters: st.speedKmh / 3.6 * 3600, bearing: st.headingDeg), anchor: .center) {
+                Circle().stroke(Entity.Kind.storm.color, lineWidth: 1.5).frame(width: 14, height: 14)
+            }
+            Annotation("", coordinate: st.coord, anchor: .center) {
+                Image(systemName: "cloud.bolt.rain.fill").foregroundStyle(Entity.Kind.storm.color).font(.title3)
+                    .frame(width: 30, height: 30).contentShape(Rectangle())
+                    .onTapGesture { s.select(Entity.from(st)) }
+            }
+            .annotationTitles(.hidden)
+        }
+        if s.layers.contains(.power), s.distance < 250_000 {
+            ForEach(s.powerLines) { l in
+                MapPolyline(coordinates: l.points).stroke(l.color.opacity(0.8), lineWidth: l.voltage >= 230_000 ? 2.5 : 1.5)
+            }
+            ForEach(s.powerNodes) { n in
+                Annotation(n.name, coordinate: n.coord, anchor: .center) {
+                    Image(systemName: n.kind.icon).font(.system(size: 10, weight: .bold)).foregroundStyle(.yellow)
+                        .frame(width: 22, height: 22).contentShape(Rectangle())
+                        .onTapGesture { s.select(Entity.from(n)) }
+                }
+                .annotationTitles(s.distance < 40_000 && s.showLabels ? .visible : .hidden)
+            }
+        }
+        if s.layers.contains(.rail), s.distance < 150_000 {
+            ForEach(s.railLines) { l in
+                MapPolyline(coordinates: l.points)
+                    .stroke(l.kind == "yard" ? Color.gray : l.kind == "subway" ? Color.orange : l.kind == "tram" || l.kind == "light_rail" ? Color.mint : Entity.Kind.train.color,
+                            style: StrokeStyle(lineWidth: l.kind == "yard" ? 1 : 2, dash: l.kind == "rail" ? [] : [4, 3]))
+            }
+            ForEach(s.railStations) { st in
+                Annotation(st.name, coordinate: st.coord, anchor: .center) {
+                    Circle().fill(.white).frame(width: 6, height: 6).overlay(Circle().stroke(Entity.Kind.train.color, lineWidth: 1.5)).frame(width: 18, height: 18).contentShape(Rectangle())
+                        .onTapGesture { s.select(Entity.place(lat: st.lat, lon: st.lon, name: st.name, detail: "Rail \(st.kind)", distance: 3_000)) }
+                }
+                .annotationTitles(s.distance < 25_000 && s.showLabels ? .visible : .hidden)
+            }
+        }
+        ForEach(s.visibleTrains) { t in
+            Annotation(t.name, coordinate: t.coord, anchor: .center) {
+                MarkerGlyph(system: "train.side.front.car", color: Entity.Kind.train.color, size: 12, rotation: 0, id: t.id, tracked: s.trackedID == "train-\(t.id)", detection: s.detection)
+                    .onTapGesture { s.select(Entity.from(t)) }
+            }
+            .annotationTitles(s.distance < 600_000 && s.showLabels ? .visible : .hidden)
+        }
+        ForEach(s.visibleAirports) { a in
+            Annotation(a.iata.isEmpty ? a.id : a.iata, coordinate: a.coord, anchor: .center) {
+                Image(systemName: "airplane.circle").font(.system(size: a.type == "large_airport" ? 14 : 10)).foregroundStyle(Entity.Kind.airport.color)
+                    .frame(width: 24, height: 24).contentShape(Rectangle())
+                    .onTapGesture { s.select(Entity.from(a)) }
+            }
+            .annotationTitles(s.showLabels && (a.type == "large_airport" || s.distance < 800_000) ? .visible : .hidden)
+        }
+        ForEach(s.visibleStations) { w in
+            Annotation(w.tempC.map { "\(Int($0))°" } ?? w.id, coordinate: w.coord, anchor: .center) {
+                ZStack {
+                    Circle().fill(Entity.Kind.station.color.opacity(0.2)).frame(width: 18, height: 18)
+                    if let d = w.windDir, let k = w.windKt, k > 0 {
+                        Image(systemName: "arrow.up").font(.system(size: 9, weight: .bold)).rotationEffect(.degrees(d + 180)).foregroundStyle(Entity.Kind.station.color)
+                    } else {
+                        Image(systemName: w.kind == "BUOY" ? "water.waves" : "thermometer.medium").font(.system(size: 8)).foregroundStyle(Entity.Kind.station.color)
+                    }
+                }
+                .frame(width: 24, height: 24).contentShape(Rectangle())
+                .onTapGesture { s.select(Entity.from(w)) }
+            }
+            .annotationTitles(s.showLabels && s.distance < 1_500_000 ? .visible : .hidden)
+        }
+        ForEach(s.visibleHazards) { h in
+            ForEach(Array(h.rings.enumerated()), id: \.offset) { ring in
+                MapPolygon(coordinates: ring.element).foregroundStyle(h.color.opacity(0.18)).stroke(h.color.opacity(0.8), lineWidth: 1.5)
+            }
+            Annotation(h.event, coordinate: h.coord, anchor: .center) {
+                Image(systemName: h.source == "Cal Fire" ? "flame.fill" : "exclamationmark.triangle.fill").font(.system(size: 12)).foregroundStyle(h.color)
+                    .frame(width: 24, height: 24).contentShape(Rectangle())
+                    .onTapGesture { s.select(Entity.from(h)) }
+            }
+            .annotationTitles(s.distance < 2_000_000 && s.showLabels ? .visible : .hidden)
+        }
+        if s.layers.contains(.scanner) {
+            ForEach(s.scanners) { f in
+                Annotation(f.title, coordinate: f.coord, anchor: .center) {
+                    Image(systemName: s.scannerNow?.id == f.id ? "speaker.wave.2.fill" : "antenna.radiowaves.left.and.right").font(.system(size: 11, weight: .bold)).foregroundStyle(Entity.Kind.scanner.color)
+                        .frame(width: 24, height: 24).contentShape(Rectangle())
+                        .onTapGesture { s.select(Entity.from(f)) }
+                }
+                .annotationTitles(.hidden)
+            }
+        }
+        if s.layers.contains(.peaks), s.distance < 300_000 {
+            ForEach(s.peaks.prefix(120)) { p in
+                Annotation("\(p.name) \(Int(p.elevationM))m", coordinate: p.coord, anchor: .bottom) {
+                    Image(systemName: "triangle.fill").font(.system(size: 9)).foregroundStyle(Entity.Kind.peak.color)
+                        .frame(width: 20, height: 20).contentShape(Rectangle())
+                        .onTapGesture { s.select(Entity.from(p)) }
+                }
+                .annotationTitles(s.distance < 80_000 && s.showLabels ? .visible : .hidden)
+            }
+        }
+        if s.layers.contains(.quakes), s.distance < 3_000_000 {
+            ForEach(s.visibleQuakes.filter { $0.mag >= 4 }) { q in
+                MapCircle(center: q.coord, radius: pow(10, 0.5 * q.mag) * 120)
+                    .foregroundStyle((q.depthKm < 70 ? Color.red : q.depthKm < 300 ? Color.orange : Color.blue).opacity(0.12))
+                    .stroke((q.depthKm < 70 ? Color.red : q.depthKm < 300 ? Color.orange : Color.blue).opacity(0.6), lineWidth: 1)
+            }
+        }
+        if s.location.coordinate != nil { UserAnnotation() }
     }
 
     private var showContactLabels: Bool { s.showLabels && s.distance < 250_000 }
@@ -1101,7 +1047,10 @@ struct LayersSheet: View {
         case .satellites: return "\(s.satellites.count) propagated"
         case .quakes: return "\(s.quakes.count) events / 24h"
         case .launches: return "\(s.launches.count) missions"
-        case .cctv: return "\(s.cameras.count) cams · \(s.cameras.filter(\.isLiveVideo).count) live video · \(s.cctv.watching.count) watched"
+        case .cctv:
+            let liveVideoCount = s.cameras.filter(\.isLiveVideo).count
+            let watchedCount = s.cctv.watching.count
+            return "\(s.cameras.count) cams · \(liveVideoCount) live video · \(watchedCount) watched"
         case .traffic: return "live flow on basemap"
         case .fires: return s.firmsKey.isEmpty ? "needs key" : "\(s.fires.count) detections"
         case .bikeshare: return s.bikes.isEmpty ? "zoom into a supported city" : "\(s.bikes.count) stations"
