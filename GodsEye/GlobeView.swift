@@ -40,15 +40,13 @@ struct GlobeView: View {
                 if s.layers.contains(.flights) || s.layers.contains(.military) {
                     ForEach(s.visibleContacts) { c in
                         Annotation(c.displayName, coordinate: c.coord, anchor: .center) {
-                            Button { s.select(Entity.from(c)) } label: {
-                                Image(systemName: "airplane")
-                                    .font(.system(size: c.military ? 13 : 11, weight: .bold))
-                                    .foregroundStyle(c.military ? Color.orange : s.accent)
-                                    .rotationEffect(.degrees(c.track - 90))
-                                    .shadow(color: .black, radius: 2)
-                                    .frame(width: 24, height: 24)
-                                    .contentShape(Rectangle())
-                            }
+                            Image(systemName: "airplane")
+                                .font(.system(size: c.military ? 13 : 11, weight: .bold))
+                                .foregroundStyle(c.military ? Color.orange : s.accent)
+                                .rotationEffect(.degrees(c.track - 90))
+                                .frame(width: 28, height: 28)
+                                .contentShape(Rectangle())
+                                .onTapGesture { s.select(Entity.from(c)) }
                         }
                         .annotationTitles(showContactLabels ? .visible : .hidden)
                     }
@@ -56,46 +54,42 @@ struct GlobeView: View {
 
                 ForEach(s.visibleQuakes) { q in
                     Annotation(String(format: "M%.1f", q.mag), coordinate: q.coord, anchor: .center) {
-                        Button { s.select(Entity.from(q)) } label: {
-                            ZStack {
-                                Circle().fill(q.color.opacity(0.25))
-                                    .frame(width: quakeSize(q) * 2.2, height: quakeSize(q) * 2.2)
-                                Circle().stroke(q.color, lineWidth: 1.5)
-                                    .frame(width: quakeSize(q), height: quakeSize(q))
-                                Circle().fill(q.color).frame(width: 3, height: 3)
-                            }
-                            .contentShape(Circle())
+                        ZStack {
+                            Circle().fill(q.color.opacity(0.22))
+                                .frame(width: quakeSize(q) * 2, height: quakeSize(q) * 2)
+                            Circle().stroke(q.color, lineWidth: 1.5)
+                                .frame(width: quakeSize(q), height: quakeSize(q))
                         }
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                        .onTapGesture { s.select(Entity.from(q)) }
                     }
                     .annotationTitles(q.mag >= 5 && s.showLabels ? .visible : .hidden)
                 }
 
                 if s.layers.contains(.satellites), let iss = s.iss {
                     Annotation("ISS", coordinate: iss.coord, anchor: .center) {
-                        Button { s.select(Entity.from(iss)) } label: {
-                            ZStack {
-                                Circle().stroke(Color.cyan.opacity(0.5), lineWidth: 1).frame(width: 30, height: 30)
-                                Image(systemName: "sparkle")
-                                    .font(.system(size: 14, weight: .bold))
-                                    .foregroundStyle(.cyan)
-                                    .shadow(color: .cyan, radius: 6)
-                            }
-                            .contentShape(Circle())
+                        ZStack {
+                            Circle().stroke(Color.cyan.opacity(0.5), lineWidth: 1).frame(width: 30, height: 30)
+                            Image(systemName: "sparkle")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.cyan)
                         }
+                        .frame(width: 34, height: 34)
+                        .contentShape(Rectangle())
+                        .onTapGesture { s.select(Entity.from(iss)) }
                     }
                     .annotationTitles(s.showLabels ? .visible : .hidden)
                 }
 
                 ForEach(s.visibleLaunches) { l in
                     Annotation(l.name, coordinate: l.coord, anchor: .bottom) {
-                        Button { s.select(Entity.from(l)) } label: {
-                            Image(systemName: l.net > Date() ? "flame" : "flame.fill")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(.pink)
-                                .shadow(color: .black, radius: 2)
-                                .frame(width: 26, height: 26)
-                                .contentShape(Rectangle())
-                        }
+                        Image(systemName: l.net > Date() ? "flame" : "flame.fill")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.pink)
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                            .onTapGesture { s.select(Entity.from(l)) }
                     }
                     .annotationTitles(.hidden)
                 }
@@ -107,7 +101,6 @@ struct GlobeView: View {
             .mapStyle(s.mapStyle)
             .mapControls {
                 MapCompass()
-                MapScaleView()
             }
             .onMapCameraChange(frequency: .onEnd) { ctx in s.cameraChanged(ctx) }
             .onTapGesture { pt in
@@ -161,7 +154,10 @@ struct GlassButton: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: icon)
-                Text(label).font(.system(size: 12, weight: .semibold, design: .monospaced))
+                Text(label)
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 if let b = badge {
                     Text("\(b)")
                         .font(.system(size: 10, weight: .bold, design: .monospaced))
@@ -170,9 +166,10 @@ struct GlassButton: View {
                 }
             }
             .foregroundStyle(active ? Color.black : Color.primary)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 10)
             .padding(.vertical, 9)
             .frame(maxWidth: .infinity)
+            .fixedSize(horizontal: false, vertical: true)
             .background {
                 if active { Capsule().fill(.tint) }
                 else { Capsule().fill(.ultraThinMaterial) }

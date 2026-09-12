@@ -99,8 +99,8 @@ struct SettingsView: View {
                     Text("Performance")
                 } footer: {
                     Text(s.performanceMode
-                         ? "Flat terrain · 250 contact cap · 30s polling."
-                         : "3D terrain · 700 contact cap · 15s polling. Enable performance mode on older devices.")
+                         ? "Flat terrain · up to 250 contacts when zoomed in · 30s polling. Recommended on iPhone XS-era devices."
+                         : "3D terrain · up to 600 contacts when zoomed in · 15s polling. Heavier on older devices.")
                 }
 
                 Section {
@@ -135,7 +135,7 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    LabeledContent("App", value: "GodsEye 1.0.0")
+                    LabeledContent("App", value: "GodsEye 1.0.1")
                     LabeledContent("Build", value: "MRzefv")
                     LabeledContent("Inspired by", value: "gods-eye-view (MIT)")
                     Text("Exploratory visualization of public data. Feeds may be delayed, incomplete, or wrong. Not for flight, maritime, emergency, or other safety-critical use. No people tracking — assets, events, and infrastructure only.")

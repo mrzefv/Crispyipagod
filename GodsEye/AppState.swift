@@ -16,11 +16,15 @@ final class AppState: ObservableObject {
 
     // Data
     @Published var layers: Set<Layer> {
-        didSet { ud.set(layers.map(\.rawValue), forKey: "layers"); if layers.contains(.military) && militaryContacts.isEmpty { Task { await refreshMilitary() } } }
+        didSet {
+            ud.set(layers.map(\.rawValue), forKey: "layers")
+            rebuildDisplay()
+            if layers.contains(.military) && militaryContacts.isEmpty { Task { await refreshMilitary() } }
+        }
     }
-    @Published var contacts: [Contact] = []
-    @Published var militaryContacts: [Contact] = []
-    @Published var quakes: [Quake] = []
+    @Published var contacts: [Contact] = [] { didSet { rebuildDisplay() } }
+    @Published var militaryContacts: [Contact] = [] { didSet { rebuildDisplay() } }
+    @Published var quakes: [Quake] = [] { didSet { rebuildDisplay() } }
     @Published var iss: SatPos?
     @Published var launches: [Launch] = []
     @Published var lastUpdate: Date?
@@ -36,7 +40,7 @@ final class AppState: ObservableObject {
     // Timeline
     let windowStart: Date
     let windowEnd: Date
-    @Published var timeCursor: Date?      // nil == LIVE
+    @Published var timeCursor: Date? { didSet { if (timeCursor == nil) != (oldValue == nil) || playing == false { rebuildDisplay() } } }  // nil == LIVE
     @Published var playing = false
     @Published var focusedEvent: Entity?
 
@@ -48,7 +52,7 @@ final class AppState: ObservableObject {
     // Settings
     @Published var mapStyleRaw: String { didSet { ud.set(mapStyleRaw, forKey: "mapStyle") } }
     @Published var accentRaw: String { didSet { ud.set(accentRaw, forKey: "accent") } }
-    @Published var performanceMode: Bool { didSet { ud.set(performanceMode, forKey: "perf") } }
+    @Published var performanceMode: Bool { didSet { ud.set(performanceMode, forKey: "perf"); rebuildDisplay() } }
     @Published var offlineMode: Bool { didSet { ud.set(offlineMode, forKey: "offline"); Feeds.shared.offline = offlineMode } }
     @Published var showLabels: Bool { didSet { ud.set(showLabels, forKey: "labels") } }
     @Published var cacheBytes: Int64 = FeedCache.size()
@@ -70,7 +74,7 @@ final class AppState: ObservableObject {
         layers = saved.map(Set.init) ?? [.flights, .quakes, .satellites, .launches]
         mapStyleRaw = ud.string(forKey: "mapStyle") ?? "imagery"
         accentRaw = ud.string(forKey: "accent") ?? "green"
-        performanceMode = ud.bool(forKey: "perf")
+        performanceMode = ud.object(forKey: "perf") as? Bool ?? true
         offlineMode = ud.bool(forKey: "offline")
         showLabels = ud.object(forKey: "labels") as? Bool ?? true
         if let d = ud.data(forKey: "bookmarks"), let b = try? JSONDecoder().decode([Bookmark].self, from: d) { bookmarks = b }
@@ -97,26 +101,53 @@ final class AppState: ObservableObject {
         }
     }
 
-    var contactCap: Int { performanceMode ? 250 : 700 }
     var pollInterval: UInt64 { performanceMode ? 30 : 15 }
     var isLive: Bool { timeCursor == nil }
     var effectiveTime: Date { timeCursor ?? Date() }
 
-    var visibleContacts: [Contact] {
-        var out: [String: Contact] = [:]
-        if layers.contains(.flights) { for c in contacts where !c.military { out[c.id] = c } }
-        if layers.contains(.military) {
-            for c in contacts where c.military { out[c.id] = c }
-            for c in militaryContacts { out[c.id] = c }
-        }
-        let c = center
-        return Array(out.values.sorted { $0.coord.distance(to: c) < $1.coord.distance(to: c) }.prefix(contactCap))
+    // Display lists are cached and rebuilt only when inputs change (never per render).
+    @Published private(set) var visibleContacts: [Contact] = []
+    @Published private(set) var visibleQuakes: [Quake] = []
+
+    /// Contact cap by zoom: nothing at globe scale, dense only when close.
+    var contactCap: Int {
+        let d = distance
+        if d > 7_000_000 { return 0 }
+        if d > 2_500_000 { return performanceMode ? 60 : 120 }
+        if d > 800_000 { return performanceMode ? 150 : 300 }
+        return performanceMode ? 250 : 600
     }
 
-    var visibleQuakes: [Quake] {
-        guard layers.contains(.quakes) else { return [] }
-        guard let t = timeCursor else { return quakes }
-        return quakes.filter { $0.time <= t }
+    func rebuildDisplay() {
+        // contacts
+        var out: [String: Contact] = [:]
+        let cap = contactCap
+        if cap > 0 {
+            if layers.contains(.flights) { for c in contacts where !c.military { out[c.id] = c } }
+            if layers.contains(.military) {
+                for c in contacts where c.military { out[c.id] = c }
+                for c in militaryContacts { out[c.id] = c }
+            }
+        }
+        let cen = center
+        let ranked: [Contact]
+        if out.count > cap {
+            ranked = Array(out.values.map { ($0, $0.coord.distance(to: cen)) }
+                .sorted { $0.1 < $1.1 }
+                .prefix(cap)
+                .map(\.0))
+        } else {
+            ranked = out.values.sorted { $0.id < $1.id }
+        }
+        if ranked != visibleContacts { visibleContacts = ranked }
+
+        // quakes
+        var q: [Quake] = []
+        if layers.contains(.quakes) {
+            q = timeCursor.map { t in quakes.filter { $0.time <= t } } ?? quakes
+            if distance > 7_000_000 { q = q.filter { $0.mag >= 2.5 } }
+        }
+        if q != visibleQuakes { visibleQuakes = q }
     }
 
     var visibleLaunches: [Launch] { layers.contains(.launches) ? launches : [] }
@@ -152,6 +183,7 @@ final class AppState: ObservableObject {
         status = "Listening for transponders…"
         await refreshContacts(force: true)
         if layers.contains(.military) { await refreshMilitary() }
+        rebuildDisplay()
         status = "Online"
         location.request()
         ready = true
@@ -219,8 +251,10 @@ final class AppState: ObservableObject {
     // MARK: Camera
 
     func cameraChanged(_ ctx: MapCameraUpdateContext) {
+        let prevCap = contactCap
         center = ctx.camera.centerCoordinate
         distance = ctx.camera.distance
+        if contactCap != prevCap || contactCap > 0 { rebuildDisplay() }
         if let last = lastContactFetchCenter, last.distance(to: center) > 200_000 {
             Task { await refreshContacts(force: true) }
         }
@@ -336,12 +370,15 @@ final class AppState: ObservableObject {
         if timeCursor == nil || timeCursor! >= windowEnd { timeCursor = windowStart }
         playTask?.cancel()
         playTask = Task { [weak self] in
+            var tick = 0
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 200_000_000)
                 guard let self, !Task.isCancelled else { return }
                 let next = (self.timeCursor ?? self.windowStart).addingTimeInterval(20 * 60)
-                if next >= self.windowEnd { self.timeCursor = nil; self.playing = false; return }
+                if next >= self.windowEnd { self.timeCursor = nil; self.playing = false; self.rebuildDisplay(); return }
                 self.timeCursor = next
+                tick += 1
+                if tick % 3 == 0 { self.rebuildDisplay() }
             }
         }
     }
@@ -350,6 +387,7 @@ final class AppState: ObservableObject {
         playing = false
         playTask?.cancel()
         playTask = nil
+        rebuildDisplay()
     }
 
     func jump(forward: Bool) {

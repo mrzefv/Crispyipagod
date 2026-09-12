@@ -10,6 +10,8 @@ struct GodsEyeApp: App {
                 .environmentObject(state)
                 .preferredColorScheme(.dark)
                 .tint(state.accent)
+                .dynamicTypeSize(.small ... .large)
+                .ignoresSafeArea(.keyboard)
         }
     }
 }
