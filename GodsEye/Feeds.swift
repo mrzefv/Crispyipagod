@@ -358,6 +358,37 @@ final class Feeds {
         }
     }
 
+    func residentialBlueprints(center c: CLLocationCoordinate2D, spanDeg: Double) async throws -> [ResidentialBlueprint] {
+        let s = max(0.006, min(spanDeg, 0.018))
+        let bbox = String(format: "%.4f,%.4f,%.4f,%.4f", c.latitude - s, c.longitude - s * 1.35, c.latitude + s, c.longitude + s * 1.35)
+        let q = """
+        [out:json][timeout:20];(
+          way["building"~"^(house|detached|semidetached_house|terrace|apartments|residential)$"](\(bbox));
+          relation["building"~"^(house|detached|semidetached_house|terrace|apartments|residential)$"](\(bbox));
+        );out geom 700;
+        """
+        let r = try await overpass(q, cache: "residential-blueprints.json")
+        return Array(r.elements.compactMap(\.value).compactMap { e in
+            guard let g = e.geometry, g.count > 2, let value = e.tags?["building"] else { return nil }
+            let kind: ResidentialBlueprint.Kind
+            switch value {
+            case "apartments": kind = .apartments
+            case "residential": kind = .residential
+            case "detached": kind = .detached
+            case "semidetached_house": kind = .semidetachedHouse
+            case "terrace": kind = .terrace
+            default: kind = .house
+            }
+            return ResidentialBlueprint(
+                id: "\(e.type)-\(e.id)",
+                kind: kind,
+                name: e.tags?["name"] ?? value.replacingOccurrences(of: "_", with: " ").capitalized,
+                levels: e.tags?["building:levels"],
+                points: g.map { CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) }
+            )
+        }.prefix(700))
+    }
+
     // MARK: Submarine cables
 
     func cables() async throws -> [Cable] {

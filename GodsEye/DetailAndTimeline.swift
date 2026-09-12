@@ -115,6 +115,9 @@ struct DetailSheet: View {
             if entity.kind == .airport {
                 ActionChip(icon: "airplane.arrival", title: "Runways", active: s.layers.contains(.airport)) { s.layers.insert(.airport); s.fly(to: entity.coord, distance: 6_000, pitch: 50) }
             }
+            if entity.kind == .place {
+                ActionChip(icon: "house.lodge", title: "Blueprints", active: s.layers.contains(.residential)) { s.layers.insert(.residential); s.fly(to: entity.coord, distance: min(entity.viewDistance, 5_000), pitch: 55) }
+            }
             if entity.kind == .peak || entity.kind == .place {
                 ActionChip(icon: "mountain.2", title: "Elevation", active: false) { Task { if let e = await s.elevation(at: entity.coord) { s.show(String(format: "Elevation %.0f m · %.0f ft", e, e * 3.281)) } } }
             }

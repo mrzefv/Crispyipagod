@@ -6,7 +6,7 @@ import SwiftUI
 
 enum Layer: String, CaseIterable, Identifiable, Codable {
     case flights, military, ships, satellites, quakes, launches, cctv, traffic, fires, bikeshare, radio, infra, cables, airport
-    case radar, satir, wind, power, rail, trains, airports, stations, alerts, space, scanner, peaks
+    case radar, satir, wind, power, rail, trains, airports, stations, alerts, space, scanner, peaks, residential
     var id: String { rawValue }
 
     var title: String {
@@ -37,6 +37,7 @@ enum Layer: String, CaseIterable, Identifiable, Codable {
         case .space: return "Sun & Space Weather"
         case .scanner: return "Scanner Feeds"
         case .peaks: return "Peaks & Terrain"
+        case .residential: return "Residential Blueprints"
         }
     }
     var icon: String {
@@ -67,6 +68,7 @@ enum Layer: String, CaseIterable, Identifiable, Codable {
         case .space: return "sun.max"
         case .scanner: return "antenna.radiowaves.left.and.right"
         case .peaks: return "mountain.2"
+        case .residential: return "house.lodge"
         }
     }
     var source: String {
@@ -97,6 +99,7 @@ enum Layer: String, CaseIterable, Identifiable, Codable {
         case .space: return "NOAA SWPC"
         case .scanner: return "Broadcastify"
         case .peaks: return "OSM · Open-Meteo"
+        case .residential: return "OSM Overpass"
         }
     }
     var needsKey: Bool { self == .ships || self == .fires }
@@ -580,6 +583,35 @@ struct AirportFeature: Identifiable, Equatable {
     let name: String
     let points: [CLLocationCoordinate2D]
     static func == (a: AirportFeature, b: AirportFeature) -> Bool { a.id == b.id }
+}
+
+struct ResidentialBlueprint: Identifiable, Equatable {
+    enum Kind: String {
+        case house, apartments, residential, detached, semidetachedHouse, terrace
+
+        var fill: Color {
+            switch self {
+            case .apartments: return Color.cyan.opacity(0.18)
+            case .residential: return Color.teal.opacity(0.14)
+            default: return Color.orange.opacity(0.12)
+            }
+        }
+
+        var stroke: Color {
+            switch self {
+            case .apartments: return Color.cyan.opacity(0.85)
+            case .residential: return Color.teal.opacity(0.8)
+            default: return Color.orange.opacity(0.75)
+            }
+        }
+    }
+
+    let id: String
+    let kind: Kind
+    let name: String
+    let levels: String?
+    let points: [CLLocationCoordinate2D]
+    static func == (a: ResidentialBlueprint, b: ResidentialBlueprint) -> Bool { a.id == b.id }
 }
 
 // MARK: - Submarine cables (TeleGeography public geojson)

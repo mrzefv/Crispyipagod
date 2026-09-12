@@ -62,6 +62,7 @@ final class AppState: ObservableObject {
             if layers.contains(.space) { Task { await refreshSpace() } }
             if layers.contains(.scanner) && scanners.isEmpty { Task { await refreshScanners() } }
             if layers.contains(.peaks) { Task { await refreshPeaks() } }
+            if layers.contains(.residential) { Task { await refreshResidentialBlueprints() } }
         }
     }
     @Published var contacts: [Contact] = [] { didSet { rebuildDisplay(); trackTick(fromPoll: true) } }
@@ -94,6 +95,7 @@ final class AppState: ObservableObject {
     @Published var hazards: [HazardAlert] = []
     @Published var scanners: [ScannerFeed] = []
     @Published var peaks: [Peak] = []
+    @Published var residentialBlueprints: [ResidentialBlueprint] = []
     @Published var space = SpaceWeather()
     @Published var auroraPoints: [AuroraPoint] = []
     @Published var night: [CLLocationCoordinate2D] = []
@@ -487,6 +489,10 @@ final class AppState: ObservableObject {
         stations = mm + bb
         rebuildDisplay()
     }
+    func refreshResidentialBlueprints() async {
+        guard layers.contains(.residential), distance < 8_000 else { residentialBlueprints = []; return }
+        do { residentialBlueprints = try await Feeds.shared.residentialBlueprints(center: center, spanDeg: max(0.006, distance / 550_000)) } catch { feedErrors += 1 }
+    }
     func refreshHazards() async {
         let nn = (try? await Feeds.shared.nwsAlerts()) ?? []
         let cc = (try? await Feeds.shared.calFire()) ?? []
@@ -619,6 +625,7 @@ final class AppState: ObservableObject {
         await refreshContacts(force: true)
         if layers.contains(.military) { await refreshMilitary() }
         if layers.contains(.cctv) { await refreshCameras() }
+        if layers.contains(.residential) { await refreshResidentialBlueprints() }
         rebuildDisplay()
         status = "Online"
         location.request()
@@ -786,6 +793,7 @@ final class AppState: ObservableObject {
         if layers.contains(.bikeshare) { await refreshBikes() }
         if layers.contains(.infra) { await refreshInfra() }
         if layers.contains(.airport) { await refreshAirport() }
+        if layers.contains(.residential) { await refreshResidentialBlueprints() }
         await refreshContacts(force: true)
         await refreshQuakes()
         await refreshISS()
@@ -857,6 +865,7 @@ final class AppState: ObservableObject {
                 if layers.contains(.rail) { await refreshRail() }
                 if layers.contains(.stations) { await refreshStations() }
                 if layers.contains(.peaks) { await refreshPeaks() }
+                if layers.contains(.residential) { await refreshResidentialBlueprints() }
             }
         }
         rebuildRadar()

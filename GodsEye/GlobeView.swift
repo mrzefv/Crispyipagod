@@ -289,6 +289,15 @@ struct GlobeView: View {
             }
         }
 
+        // Residential building blueprints
+        if s.layers.contains(.residential), s.distance < 8_000 {
+            ForEach(s.residentialBlueprints) { building in
+                MapPolygon(coordinates: building.points)
+                    .foregroundStyle(building.kind.fill)
+                    .stroke(building.kind.stroke, lineWidth: building.kind == .apartments ? 1.6 : 1.1)
+            }
+        }
+
         // Submarine cables
         ForEach(s.visibleCables) { cable in
             ForEach(Array(cable.segments.enumerated()), id: \.offset) { seg in
@@ -1212,6 +1221,7 @@ struct LayersSheet: View {
         case .space: return "Kp \(String(format: "%.1f", s.space.kp)) · \(s.space.stormLevel)"
         case .scanner: return "\(s.scanners.count) feeds"
         case .peaks: return s.peaks.isEmpty ? "zoom in (<300 km)" : "\(s.peaks.count) peaks"
+        case .residential: return s.residentialBlueprints.isEmpty ? "zoom in (<8 km)" : "\(s.residentialBlueprints.count) footprints"
         }
     }
 }

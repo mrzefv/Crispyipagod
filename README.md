@@ -58,6 +58,7 @@ Target: iOS 17+. Bundle id `party.mrvek.godseye`.
 - **Lightning:** no free real-time feed exists (Blitzortung is participants-only, Vaisala/Earth Networks are paid). Hooks are in place; the layer ships off.
 - **Power grid** (Overpass): transmission lines colored by voltage class, plants, substations with operator/voltage tags.
 - **Rail** (Overpass): rail / subway / light-rail / tram / yards + stations. **Live trains:** Amtrak (Amtraker) + Finland (Digitraffic), trackable like aircraft.
+- **Residential blueprints** (Overpass): public OSM building footprints for houses, apartments, and other residential buildings, shown as close-in map overlays.
 - **Airports** (OurAirports, medium+large) with ICAO/IATA; one-tap runway geometry.
 - **Seismic upgrade:** magnitude-scaled depth rings, 24 h / 7 d / 30 d windows, aftershock clustering in Settings.
 - **Weather stations:** METAR (aviationweather.gov) + NDBC buoys; tap → 24 h temp/wind/pressure charts (Open-Meteo).
