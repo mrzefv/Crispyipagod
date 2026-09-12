@@ -1301,3 +1301,13 @@ extension CLLocationCoordinate2D {
 extension String {
     func ifEmpty(_ fallback: String) -> String { isEmpty ? fallback : self }
 }
+
+extension Optional where Wrapped == String {
+    /// nil or "" -> fallback, otherwise the wrapped string.
+    func ifEmpty(_ fallback: String) -> String {
+        switch self {
+        case .some(let v) where !v.isEmpty: return v
+        default: return fallback
+        }
+    }
+}
