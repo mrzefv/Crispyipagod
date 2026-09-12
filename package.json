@@ -1,0 +1,17 @@
+{
+  "name": "crispyipagod",
+  "version": "1.0.0",
+  "description": "IPA",
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 4173",
+    "test": "node --test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://localhost:26831/mrzefv/Crispyipagod"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "Apache-2.0"
+}
