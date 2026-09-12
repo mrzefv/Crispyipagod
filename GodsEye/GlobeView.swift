@@ -173,8 +173,8 @@ struct GlobeView: View {
                 if s.detectionOverlay {
                     Text("DETECT \(s.visibleContacts.count) AC · \(s.visibleSatellites.count) SAT · \(s.visibleCameras.count) CAM")
                         .font(.caption.monospaced().bold())
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.7)
                         .padding(.horizontal, 8).padding(.vertical, 5)
                         .background(.black.opacity(0.55), in: Capsule())
                         .overlay(Capsule().stroke(s.accent.opacity(0.6), lineWidth: 0.8))

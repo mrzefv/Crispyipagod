@@ -385,7 +385,21 @@ final class AppState: ObservableObject {
     }
 
     func trackSelected() {
-        toggleTracking(selected)
+        if let selected {
+            toggleTracking(selected)
+            return
+        }
+        if let c = nearbyContacts.first ?? contacts.first {
+            let e = Entity.from(c)
+            select(e)
+            toggleTracking(e)
+            return
+        }
+        if let sat = iss {
+            let e = Entity.from(sat)
+            select(e)
+            toggleTracking(e)
+        }
     }
 
     func updateTrackingTrail() {
@@ -511,7 +525,7 @@ final class AppState: ObservableObject {
                 return
             }
         }
-        if let title = pending.title, let la = pending.lat, let lo = pending.lon {
+        if pending.sel == nil, let title = pending.title, let la = pending.lat, let lo = pending.lon {
             selected = Entity.place(lat: la, lon: lo, name: title, detail: "Shared target", distance: 20_000)
             pendingDeepLinkSelection = nil
         }
