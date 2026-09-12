@@ -435,7 +435,9 @@ final class Feeds {
         let key = q.lowercased()
             .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        let cacheKey = "parcel-\(String(key.prefix(48)).ifEmpty("search")).json"
+        let latKey = String(format: "%.2f", center.latitude)
+        let lonKey = String(format: "%.2f", center.longitude)
+        let cacheKey = "parcel-\(String(key.prefix(40)).ifEmpty("search"))-\(latKey)-\(lonKey).json"
         let url = "https://nominatim.openstreetmap.org/search?q=\(enc)&format=jsonv2&addressdetails=1&extratags=1&limit=\(max(1, min(limit, 30)))&viewbox=\(viewbox)&bounded=0"
         let d = try await fetch(url, cache: cacheKey)
         guard let arr = try JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { throw FeedError.badResponse }
