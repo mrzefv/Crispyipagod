@@ -86,10 +86,21 @@ struct SettingsView: View {
                     }
                     .pickerStyle(.inline)
                     .labelsHidden()
+                    Toggle("Show live traffic", isOn: $s.showTraffic)
                 } header: {
                     Text("Map style")
                 } footer: {
                     Text("Imagery uses Apple's satellite tiles with 3D terrain where available.")
+                }
+
+                Section("Sensor / HUD") {
+                    Picker("Sensor style", selection: $s.sensorStyleRaw) {
+                        ForEach(SensorStyle.allCases) { style in
+                            Text(style.title).tag(style.rawValue)
+                        }
+                    }
+                    Toggle("Detection overlay", isOn: $s.detectionOverlay)
+                    Toggle("Military HUD", isOn: $s.tacticalHUD)
                 }
 
                 Section {

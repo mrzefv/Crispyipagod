@@ -5,7 +5,7 @@ import SwiftUI
 // MARK: - Layers
 
 enum Layer: String, CaseIterable, Identifiable, Codable {
-    case flights, military, satellites, quakes, launches
+    case flights, military, satellites, quakes, launches, cameras
     var id: String { rawValue }
 
     var title: String {
@@ -15,6 +15,7 @@ enum Layer: String, CaseIterable, Identifiable, Codable {
         case .satellites: return "Satellites (ISS)"
         case .quakes: return "Earthquakes (24h)"
         case .launches: return "Space Missions"
+        case .cameras: return "Public Cameras"
         }
     }
     var icon: String {
@@ -24,6 +25,7 @@ enum Layer: String, CaseIterable, Identifiable, Codable {
         case .satellites: return "sparkle"
         case .quakes: return "waveform.path.ecg"
         case .launches: return "flame"
+        case .cameras: return "video"
         }
     }
     var source: String {
@@ -33,6 +35,7 @@ enum Layer: String, CaseIterable, Identifiable, Codable {
         case .satellites: return "wheretheiss.at"
         case .quakes: return "USGS"
         case .launches: return "Launch Library 2"
+        case .cameras: return "Public city camera portals"
         }
     }
 }
@@ -161,7 +164,28 @@ struct SatPos: Identifiable, Equatable {
     let altKm: Double
     let velocityKmh: Double
     let time: Date
+    let source: String
     var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+    var isISS: Bool { id == "25544" }
+}
+
+struct CameraFeed: Identifiable, Equatable, Codable {
+    let id: String
+    let name: String
+    let city: String
+    let lat: Double
+    let lon: Double
+    let provider: String
+    let url: String
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+
+    static let defaults: [CameraFeed] = [
+        .init(id: "cam-nyc-times", name: "Times Sq", city: "New York", lat: 40.7580, lon: -73.9855, provider: "EarthCam", url: "https://www.earthcam.com/usa/newyork/timessquare/"),
+        .init(id: "cam-london-traf", name: "Trafalgar Sq", city: "London", lat: 51.5080, lon: -0.1281, provider: "Trafalgar webcam", url: "https://www.earthcam.com/world/england/london/trafalgarsquare/"),
+        .init(id: "cam-austin-6th", name: "6th Street", city: "Austin", lat: 30.2676, lon: -97.7395, provider: "Austin cam", url: "https://www.fox7austin.com/weather/cameras"),
+        .init(id: "cam-tokyo-shibuya", name: "Shibuya Crossing", city: "Tokyo", lat: 35.6595, lon: 139.7005, provider: "Shibuya cam", url: "https://www.youtube.com/results?search_query=shibuya+live+camera"),
+        .init(id: "cam-sf-bay", name: "Bay Bridge", city: "San Francisco", lat: 37.7983, lon: -122.3778, provider: "ABC7 cam", url: "https://abc7news.com/traffic/")
+    ]
 }
 
 // MARK: - Launches (Launch Library 2)
@@ -226,7 +250,7 @@ struct MetaRow: Identifiable, Equatable {
 
 struct Entity: Identifiable, Equatable {
     enum Kind: String, Codable, CaseIterable {
-        case aircraft, military, earthquake, satellite, launch, place
+        case aircraft, military, earthquake, satellite, launch, camera, place
         var icon: String {
             switch self {
             case .aircraft: return "airplane"
@@ -234,6 +258,7 @@ struct Entity: Identifiable, Equatable {
             case .earthquake: return "waveform.path.ecg"
             case .satellite: return "sparkle"
             case .launch: return "flame"
+            case .camera: return "video.fill"
             case .place: return "mappin.and.ellipse"
             }
         }
@@ -244,6 +269,7 @@ struct Entity: Identifiable, Equatable {
             case .earthquake: return "SEISMIC"
             case .satellite: return "ORBITAL"
             case .launch: return "LAUNCH"
+            case .camera: return "CAMERA"
             case .place: return "LOCATION"
             }
         }
@@ -254,6 +280,7 @@ struct Entity: Identifiable, Equatable {
             case .earthquake: return .red
             case .satellite: return .cyan
             case .launch: return .pink
+            case .camera: return .mint
             case .place: return .white
             }
         }
@@ -335,7 +362,7 @@ struct Entity: Identifiable, Equatable {
                 MetaRow("Altitude", String(format: "%.1f km", s.altKm)),
                 MetaRow("Velocity", "\(Int(s.velocityKmh).formatted()) km/h"),
                 MetaRow("Fix time", Fmt.time(s.time)),
-                MetaRow("Source", "wheretheiss.at")
+                MetaRow("Source", s.source)
             ],
             url: "https://wheretheiss.at",
             viewDistance: 3_000_000)
@@ -380,6 +407,59 @@ struct Entity: Identifiable, Equatable {
             ],
             url: nil,
             viewDistance: distance)
+    }
+
+    static func from(_ cam: CameraFeed) -> Entity {
+        Entity(
+            id: cam.id,
+            kind: .camera,
+            title: cam.name,
+            subtitle: cam.city,
+            summary: "Public camera overlay · \(cam.provider)",
+            lat: cam.lat,
+            lon: cam.lon,
+            time: nil,
+            meta: [
+                MetaRow("City", cam.city),
+                MetaRow("Provider", cam.provider),
+                MetaRow("Source", "Public camera directory")
+            ],
+            url: cam.url,
+            viewDistance: 35_000
+        )
+    }
+}
+
+enum SensorStyle: String, CaseIterable, Identifiable, Codable {
+    case normal, nvg, flir, crt, noir
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .normal: return "Normal"
+        case .nvg: return "NVG"
+        case .flir: return "FLIR"
+        case .crt: return "CRT"
+        case .noir: return "Noir"
+        }
+    }
+}
+
+enum MissionPreset: String, CaseIterable, Identifiable {
+    case liveContacts, space, environmental
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .liveContacts: return "Live Contacts"
+        case .space: return "Space Mission"
+        case .environmental: return "Environmental"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .liveContacts: return "airplane.circle"
+        case .space: return "sparkles"
+        case .environmental: return "leaf"
+        }
     }
 }
 

@@ -74,10 +74,13 @@ struct DetailSheet: View {
             ActionChip(icon: s.isBookmarked(entity) ? "bookmark.fill" : "bookmark",
                        title: s.isBookmarked(entity) ? "Saved" : "Save",
                        active: s.isBookmarked(entity)) { s.toggleBookmark(entity) }
+            ActionChip(icon: s.trackedEntityId == entity.id ? "scope.circle.fill" : "scope",
+                       title: s.trackedEntityId == entity.id ? "Tracking" : "Track",
+                       active: s.trackedEntityId == entity.id) { s.toggleTracking(entity) }
             ActionChip(icon: "clock.arrow.circlepath", title: "Timeline", active: false) {
                 s.openTimeline(at: entity.time)
             }
-            ShareLink(item: entity.shareText) {
+            ShareLink(item: [entity.shareText, s.shareURL(for: entity)?.absoluteString].compactMap { $0 }.joined(separator: "\n\n")) {
                 HStack(spacing: 6) {
                     Image(systemName: "square.and.arrow.up")
                     Text("Share").font(.system(size: 12, weight: .semibold, design: .monospaced))

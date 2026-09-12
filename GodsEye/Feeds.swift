@@ -37,6 +37,12 @@ enum FeedCache {
 final class Feeds {
     static let shared = Feeds()
     var offline = false
+    private let satelliteCatalog: [(id: String, name: String)] = [
+        ("25544", "ISS"),
+        ("20580", "Hubble"),
+        ("43013", "NOAA 20"),
+        ("40069", "AISSat-1")
+    ]
 
     private let session: URLSession = {
         let c = URLSessionConfiguration.default
@@ -97,7 +103,44 @@ final class Feeds {
         let r = try JSONDecoder().decode(ISSResponse.self, from: d)
         return SatPos(id: "25544", name: r.name, lat: r.latitude, lon: r.longitude,
                       altKm: r.altitude, velocityKmh: r.velocity,
-                      time: Date(timeIntervalSince1970: r.timestamp))
+                      time: Date(timeIntervalSince1970: r.timestamp), source: "wheretheiss.at")
+    }
+
+    func satellites() async throws -> [SatPos] {
+        var out = await withTaskGroup(of: SatPos?.self, returning: [SatPos].self) { group in
+            for sat in satelliteCatalog {
+                group.addTask {
+                    let cache = "sat-\(sat.id).json"
+                    do {
+                        let d = try await self.fetch("https://api.wheretheiss.at/v1/satellites/\(sat.id)", cache: cache)
+                        let r = try JSONDecoder().decode(ISSResponse.self, from: d)
+                        return SatPos(
+                            id: sat.id,
+                            name: r.name.isEmpty ? sat.name : r.name,
+                            lat: r.latitude,
+                            lon: r.longitude,
+                            altKm: r.altitude,
+                            velocityKmh: r.velocity,
+                            time: Date(timeIntervalSince1970: r.timestamp),
+                            source: "wheretheiss.at"
+                        )
+                    } catch {
+                        return nil
+                    }
+                }
+            }
+            var sats: [SatPos] = []
+            for await sat in group {
+                if let sat { sats.append(sat) }
+            }
+            return sats
+        }
+        if out.isEmpty, let iss = try? await iss() {
+            out = [iss]
+        }
+        guard !out.isEmpty else { throw FeedError.badResponse }
+        let order = Dictionary(uniqueKeysWithValues: satelliteCatalog.enumerated().map { ($1.id, $0) })
+        return out.sorted { (order[$0.id] ?? .max) < (order[$1.id] ?? .max) }
     }
 
     func launches() async throws -> [Launch] {
