@@ -478,7 +478,7 @@ final class Feeds {
             let osmType = (row["osm_type"] as? String ?? "?").uppercased()
             let osmID = String(describing: row["osm_id"] ?? "")
             let recordID = "\(osmType.prefix(1))\(osmID)"
-            let house = (addr?["house_number"] as? String).ifEmpty(name ?? "")
+            let house = (addr?["house_number"] as? String ?? "").ifEmpty(name ?? "")
             let road = (addr?["road"] as? String).ifEmpty(addr?["pedestrian"] as? String ?? "")
             let fallbackTitle = [house, road].filter { !$0.isEmpty }.joined(separator: " ")
             let owner = (ext?["owner"] as? String).ifEmpty((ext?["operator"] as? String).ifEmpty(ext?["contact:person"] as? String ?? ""))

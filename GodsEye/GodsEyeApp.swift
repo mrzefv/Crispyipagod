@@ -18,7 +18,6 @@ struct GodsEyeApp: App {
 
 struct RootView: View {
     @EnvironmentObject var s: AppState
-
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
