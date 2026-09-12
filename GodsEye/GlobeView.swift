@@ -960,7 +960,7 @@ struct SearchSheet: View {
         let searchID = UUID()
         activeSearchID = searchID
         searching = true
-        searchTask = Task {
+        searchTask = Task { @MainActor in
             defer {
                 if activeSearchID == searchID { searching = false }
             }
