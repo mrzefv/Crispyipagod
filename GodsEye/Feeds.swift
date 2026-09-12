@@ -437,7 +437,7 @@ final class Feeds {
         let latKey = String(format: "%.2f", center.latitude)
         let lonKey = String(format: "%.2f", center.longitude)
         let cacheKey = "parcel-\(String(key.prefix(40)).ifEmpty("search"))-\(latKey)-\(lonKey).json"
-        let base = "https://nominatim.openstreetmap.org/search?q=\(enc)&format=jsonv2&addressdetails=1&extratags=1&limit=\(max(1, min(limit, 30)))"
+        let base = "https://nominatim.openstreetmap.org/search?q=\(enc)&format=jsonv2&addressdetails=1&extratags=1&dedupe=1&limit=\(max(1, min(limit, 30)))"
         let boxes: [(name: String, left: Double, right: Double)] = {
             if rawLeftLon < -180 {
                 return [

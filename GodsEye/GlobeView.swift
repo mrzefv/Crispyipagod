@@ -962,13 +962,13 @@ struct SearchSheet: View {
         activeSearchID = searchID
         searching = true
         searchTask = Task {
-            defer {
-                Task { @MainActor in
+            func finish() async {
+                await MainActor.run {
                     if activeSearchID == searchID { searching = false }
                 }
             }
             try? await Task.sleep(nanoseconds: 350_000_000)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { await finish(); return }
             let req = MKLocalSearch.Request()
             req.naturalLanguageQuery = trimmed
             req.resultTypes = [.pointOfInterest, .address]
@@ -977,12 +977,13 @@ struct SearchSheet: View {
             async let parcelResp = try? Feeds.shared.parcelRecords(query: trimmed, near: originCenter)
             let resp = await placeResp
             let parcel = await parcelResp
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { await finish(); return }
             let shouldApply = await MainActor.run { activeSearchID == searchID }
-            guard shouldApply else { return }
+            guard shouldApply else { await finish(); return }
             await MainActor.run {
                 places = Array((resp?.mapItems ?? []).prefix(12))
                 parcels = Array((parcel ?? []).prefix(10))
+                searching = false
             }
         }
     }
@@ -1001,32 +1002,32 @@ struct SearchSheet: View {
             try? await Task.sleep(nanoseconds: 300_000_000)
             s.select(Entity.place(lat: c.latitude, lon: c.longitude, name: name, detail: detail, distance: item.pointOfInterestCategory == .airport ? 12_000 : 6_000))
         }
+    }
 
-        private func pickParcel(_ p: ParcelRecord) {
-            let subtitle = p.owner.map { "Owner: \($0)" } ?? "Parcel record"
-            let e = Entity(
-                id: "parcel-\(p.id)",
-                kind: .place,
-                title: p.title,
-                subtitle: subtitle,
-                summary: p.address,
-                lat: p.lat,
-                lon: p.lon,
-                time: nil,
-                meta: [
-                    MetaRow("Parcel ID", p.parcelID),
-                    MetaRow("Address", p.address),
-                    MetaRow("Owner", p.owner ?? "—"),
-                    MetaRow("Source", "OpenStreetMap Nominatim")
-                ],
-                url: "https://www.openstreetmap.org/?mlat=\(p.lat)&mlon=\(p.lon)#map=18/\(p.lat)/\(p.lon)",
-                viewDistance: 2_500
-            )
-            dismiss()
-            Task {
-                try? await Task.sleep(nanoseconds: 300_000_000)
-                s.select(e)
-            }
+    private func pickParcel(_ p: ParcelRecord) {
+        let subtitle = p.owner.map { "Owner: \($0)" } ?? "Parcel record"
+        let e = Entity(
+            id: "parcel-\(p.id)",
+            kind: .place,
+            title: p.title,
+            subtitle: subtitle,
+            summary: p.address,
+            lat: p.lat,
+            lon: p.lon,
+            time: nil,
+            meta: [
+                MetaRow("Parcel ID", p.parcelID),
+                MetaRow("Address", p.address),
+                MetaRow("Owner", p.owner ?? "—"),
+                MetaRow("Source", "OpenStreetMap Nominatim")
+            ],
+            url: "https://www.openstreetmap.org/?mlat=\(p.lat)&mlon=\(p.lon)#map=18/\(p.lat)/\(p.lon)",
+            viewDistance: 2_500
+        )
+        dismiss()
+        Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            s.select(e)
         }
     }
 }
