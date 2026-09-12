@@ -358,6 +358,65 @@ final class Feeds {
         }
     }
 
+    func residentialBlueprints(center c: CLLocationCoordinate2D, spanDeg: Double) async throws -> [ResidentialBlueprint] {
+        let latLimit = 85.0511
+        let s = max(0.006, min(spanDeg, 0.018))
+        let posix = Locale(identifier: "en_US_POSIX")
+        let lonScale = min(3.0, max(1.0, 1 / max(0.35, cos(c.latitude * .pi / 180))))
+        let lonSpan = s * lonScale
+        let latMin = max(-latLimit, c.latitude - s)
+        let latMax = min(latLimit, c.latitude + s)
+        let rawLonMin = c.longitude - lonSpan
+        let rawLonMax = c.longitude + lonSpan
+        let lonBoxes: [(Double, Double)] = {
+            if rawLonMin < -180 {
+                return [(-180, rawLonMax), (rawLonMin + 360, 180)]
+            }
+            if rawLonMax > 180 {
+                return [(rawLonMin, 180), (-180, rawLonMax - 360)]
+            }
+            return [(rawLonMin, rawLonMax)]
+        }()
+
+        var out: [ResidentialBlueprint] = []
+        var seen = Set<String>()
+        for (idx, box) in lonBoxes.enumerated() {
+            let bbox = String(format: "%.4f,%.4f,%.4f,%.4f", locale: posix, latMin, box.0, latMax, box.1)
+            let cacheKey = "residential-blueprints-\(idx)-\(bbox.replacingOccurrences(of: ",", with: "_")).json"
+            let q = """
+            [out:json][timeout:20];(
+              way["building"~"^(house|detached|semidetached_house|terrace|apartments|residential)$"](\(bbox));
+              relation["building"~"^(house|detached|semidetached_house|terrace|apartments|residential)$"](\(bbox));
+            );out geom;
+            """
+            let r = try await overpass(q, cache: cacheKey)
+            for e in r.elements.compactMap(\.value) {
+                guard let g = e.geometry, g.count > 2, let value = e.tags?["building"] else { continue }
+                let kind: ResidentialBlueprint.Kind
+                switch value {
+                case "apartments": kind = .apartments
+                case "residential": kind = .residential
+                case "detached": kind = .detached
+                case "semidetached_house": kind = .semidetachedHouse
+                case "terrace": kind = .terrace
+                default: kind = .house
+                }
+                let id = "\(e.type)-\(e.id)"
+                guard !seen.contains(id) else { continue }
+                seen.insert(id)
+                out.append(ResidentialBlueprint(
+                    id: id,
+                    kind: kind,
+                    name: e.tags?["name"] ?? value.replacingOccurrences(of: "_", with: " ").capitalized,
+                    levels: e.tags?["building:levels"],
+                    points: g.map { CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) }
+                ))
+                if out.count >= 700 { return out }
+            }
+        }
+        return out
+    }
+
     // MARK: Submarine cables
 
     func cables() async throws -> [Cable] {
