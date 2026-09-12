@@ -34,7 +34,7 @@ extension Feeds {
         return URLSession(configuration: c)
     }()
 
-    private func intelGET(_ url: String, cache: String) async throws -> Data {
+    func intelGET(_ url: String, cache: String) async throws -> Data {
         if offline, let d = FeedCache.load(cache) { return d }
         guard let u = URL(string: url) else { throw FeedError.badResponse }
         var req = URLRequest(url: u)
@@ -51,7 +51,7 @@ extension Feeds {
         }
     }
 
-    private func intelPOST(_ url: String, body: String, cache: String) async throws -> Data {
+    func intelPOST(_ url: String, body: String, cache: String) async throws -> Data {
         if offline, let d = FeedCache.load(cache) { return d }
         guard let u = URL(string: url) else { throw FeedError.badResponse }
         var req = URLRequest(url: u)
@@ -70,13 +70,13 @@ extension Feeds {
         }
     }
 
-    private static func key(_ c: CLLocationCoordinate2D) -> String {
+    static func key(_ c: CLLocationCoordinate2D) -> String {
         String(format: "%.5f_%.5f", locale: Locale(identifier: "en_US_POSIX"), c.latitude, c.longitude)
     }
 
     /// Everything public we can find about a point, fetched concurrently.
     func placeIntel(at c: CLLocationCoordinate2D) async -> PlaceIntel {
-        async let parcel = parcelLookup(c)
+        async let parcel = parcelLookup(at: c)
         async let nominatim = nominatimReverse(c)
         async let overpass = overpassAround(c)
         async let census = censusGeographies(c)
@@ -138,7 +138,7 @@ extension Feeds {
             let osmType = (j["osm_type"] as? String ?? "").uppercased()
             let osmID = (j["osm_id"] as? Int).map(String.init) ?? String(describing: j["osm_id"] ?? "")
             if let n = (names["name"] as? String) ?? (j["name"] as? String), !n.isEmpty { rows.append(MetaRow("Name", n)) }
-            let cat = [(j["category"] as? String), (j["type"] as? String)].compactMap { $0 }.joined(separator: " / ")
+            let cat = [(j["category"] as? String), (j["type"] as? String)].compactMap { $0 }.joined(separator: " /")
             if !cat.isEmpty { rows.append(MetaRow("Feature", cat.replacingOccurrences(of: "_", with: " "))) }
             if let o = e("owner") ?? e("contact:owner") { rows.append(MetaRow("Owner", o)) }
             if let o = e("operator") { rows.append(MetaRow("Operator", o)) }
@@ -337,7 +337,7 @@ struct PlaceRecordsView: View {
                     .background(RoundedRectangle(cornerRadius: 12).fill(entity.kind.color.opacity(0.12)))
                 }
                 if intel.isEmpty {
-                    Text(loading ? "Querying public records…" : "No public record tags at this exact spot. Zoom in and tap directly on a building footprint, or search the address in Search → Address / owner records.")
+                    Text(loading ? "Querying public records…" : "No public record tags at this exact spot. Zoom in and tap directly on a building footprint, or search the address in Search → […]")
                         .font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 ForEach(intel.sections) { sec in section(sec) }
