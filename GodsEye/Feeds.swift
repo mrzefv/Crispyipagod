@@ -483,11 +483,11 @@ final class Feeds {
         var out: [ParcelRecord] = []
         var seen = Set<String>()
         for (idx, box) in boxes.enumerated() {
-            let left = box.left
-            let top = topLat
-            let right = box.right
-            let bottom = bottomLat
-            let viewbox = String(format: "%.5f,%.5f,%.5f,%.5f", locale: posix, left, top, right, bottom)
+            let leftLon = box.left
+            let topLatBox = topLat
+            let rightLon = box.right
+            let bottomLatBox = bottomLat
+            let viewbox = String(format: "%.5f,%.5f,%.5f,%.5f", locale: posix, leftLon, topLatBox, rightLon, bottomLatBox)
             let encBox = viewbox.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlQueryAllowed.subtracting(CharacterSet(charactersIn: ","))) ?? viewbox
             let d = try await fetch(base + "&viewbox=\(encBox)&bounded=1", cache: "\(cacheKey)-\(box.name)-\(idx)")
             guard let arr = try JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { continue }
