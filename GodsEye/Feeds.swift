@@ -361,7 +361,9 @@ final class Feeds {
     func residentialBlueprints(center c: CLLocationCoordinate2D, spanDeg: Double) async throws -> [ResidentialBlueprint] {
         let s = max(0.006, min(spanDeg, 0.018))
         let posix = Locale(identifier: "en_US_POSIX")
-        let bbox = String(format: "%.4f,%.4f,%.4f,%.4f", locale: posix, c.latitude - s, c.longitude - s * 1.35, c.latitude + s, c.longitude + s * 1.35)
+        let lonScale = min(3.0, max(1.0, 1 / max(0.35, cos(c.latitude * .pi / 180))))
+        let lonSpan = s * lonScale
+        let bbox = String(format: "%.4f,%.4f,%.4f,%.4f", locale: posix, c.latitude - s, c.longitude - lonSpan, c.latitude + s, c.longitude + lonSpan)
         let cacheKey = String(format: "residential-blueprints-%.3f-%.3f-%.3f.json", locale: posix, c.latitude, c.longitude, s)
         let q = """
         [out:json][timeout:20];(
