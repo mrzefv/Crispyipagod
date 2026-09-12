@@ -569,8 +569,15 @@ final class AppState: ObservableObject {
         rebuildDisplay()
     }
     func refreshResidentialBlueprints() async {
-        guard layers.contains(.residential) else { residentialBlueprints = []; return }
-        guard distance < 8_000 else { return }
+        guard layers.contains(.residential) else {
+            residentialBlueprints = []
+            residentialBlueprintBounds = nil
+            return
+        }
+        guard distance < 8_000 else {
+            residentialBlueprintBounds = nil
+            return
+        }
         let requestedCenter = center
         let requestedDistance = distance
         guard let span = residentialBlueprintSpan(for: requestedDistance) else { return }
