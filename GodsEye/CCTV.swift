@@ -52,6 +52,7 @@ final class CamRecorder {
         refreshMetrics()
         guard timer == nil, !watching.isEmpty else { return }
         installTimer()
+        scheduleCapture()
     }
 
     func stop() {
