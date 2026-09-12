@@ -30,6 +30,7 @@ final class CamRecorder {
     private let intervalKey = "cctvIntervalSeconds"
     private var timer: Timer?
     private var captureTask: Task<Void, Never>?
+    private var captureToken: UUID?
     private var lastFrameDigests: [String: String] = [:]
     private let maxFramesPerCamera = 400
 
@@ -60,6 +61,7 @@ final class CamRecorder {
         timer = nil
         captureTask?.cancel()
         captureTask = nil
+        captureToken = nil
     }
 
     func toggleWatch(_ id: String) {
@@ -85,10 +87,15 @@ final class CamRecorder {
 
     private func scheduleCapture() {
         guard captureTask == nil else { return }
+        let token = UUID()
+        captureToken = token
         captureTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.captureWatched()
-            self.captureTask = nil
+            if self.captureToken == token {
+                self.captureTask = nil
+                self.captureToken = nil
+            }
         }
     }
 
