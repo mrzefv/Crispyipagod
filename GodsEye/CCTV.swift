@@ -77,11 +77,13 @@ final class CamRecorder {
     }
 
     func clearAll() {
+        let shouldRestart = !watching.isEmpty
+        stop()
         try? fm.removeItem(at: rootURL)
         lastFrameDigests = [:]
         frameCounts = [:]
         storageBytes = 0
-        if !watching.isEmpty { start() }
+        if shouldRestart { start() }
     }
 
     private func installTimer() {
@@ -115,8 +117,11 @@ final class CamRecorder {
         let results = await withTaskGroup(of: (String, Data?).self, returning: [(String, Data)].self) { group in
             for (id, url) in requests {
                 group.addTask {
+                    guard !Task.isCancelled else { return (id, nil) }
                     do {
+                        guard !Task.isCancelled else { return (id, nil) }
                         let (data, response) = try await URLSession.shared.data(from: url)
+                        guard !Task.isCancelled else { return (id, nil) }
                         guard let http = response as? HTTPURLResponse,
                               (200..<300).contains(http.statusCode),
                               let mime = http.mimeType?.lowercased(),
