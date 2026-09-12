@@ -289,9 +289,7 @@ final class AppState: ObservableObject {
     }
 
     var residentialBlueprintStatus: String {
-        if distance >= 8_000 {
-            return residentialBlueprints.isEmpty ? "zoom in (<8 km)" : "\(residentialBlueprints.count) cached · zoom in"
-        }
+        if distance >= 8_000 { return "zoom in (<8 km)" }
         if residentialBlueprintCoverageActive {
             return residentialBlueprints.isEmpty ? "no footprints in view" : "\(residentialBlueprints.count) footprints"
         }
@@ -575,6 +573,7 @@ final class AppState: ObservableObject {
             return
         }
         guard distance < 8_000 else {
+            residentialBlueprints = []
             residentialBlueprintBounds = nil
             return
         }
