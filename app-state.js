@@ -47,7 +47,13 @@ export const timelineEvents = [
   { id: "evt-4", label: "Signal handoff", time: 90 },
 ];
 
-const settingKeys = new Set(["theme", "mapStyle", "performanceMode", "cacheMode"]);
+const supportedTabs = new Set(["home", "saved", "settings"]);
+const supportedSettingValues = {
+  theme: new Set(["Midnight", "Aurora", "Slate"]),
+  mapStyle: new Set(["Globe", "Terrain", "Signal"]),
+  performanceMode: new Set(["Balanced", "Battery Saver", "High Fidelity"]),
+  cacheMode: new Set(["Auto cache", "Offline ready", "Streaming only"]),
+};
 
 export function createInitialState() {
   return {
@@ -103,6 +109,10 @@ export function selectLocation(state, locationId) {
 }
 
 export function setActiveTab(state, activeTab) {
+  if (!supportedTabs.has(activeTab)) {
+    return state;
+  }
+
   return {
     ...state,
     activeTab,
@@ -192,7 +202,8 @@ export function jumpToEvent(state, direction) {
 }
 
 export function updateSetting(state, setting, value) {
-  if (!settingKeys.has(setting)) {
+  const allowedValues = supportedSettingValues[setting];
+  if (!allowedValues?.has(value)) {
     return state;
   }
 

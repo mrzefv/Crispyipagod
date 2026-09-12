@@ -81,9 +81,11 @@ test("timeline event jumps choose the closest previous and next markers", () => 
 test("switching away from home closes the timeline overlay", () => {
   const timeline = openTimeline(createInitialState());
   const saved = setActiveTab(timeline, "saved");
+  const ignored = setActiveTab(saved, "invalid");
 
   assert.equal(saved.activeTab, "saved");
   assert.equal(saved.screen, "home");
+  assert.equal(ignored.activeTab, "saved");
 });
 
 test("layers control cycles through supported map styles", () => {
@@ -99,7 +101,9 @@ test("layers control cycles through supported map styles", () => {
 test("settings updates only supported keys", () => {
   const updated = updateSetting(createInitialState(), "mapStyle", "Signal");
   const ignored = updateSetting(updated, "screen", "timeline");
+  const invalidValue = updateSetting(updated, "mapStyle", "Neon");
 
   assert.equal(updated.mapStyle, "Signal");
   assert.equal(ignored.screen, "splash");
+  assert.equal(invalidValue.mapStyle, "Signal");
 });

@@ -24,6 +24,18 @@ const quickFocusLocationId = "andes-array";
 let state = createInitialState();
 let playbackTimer;
 
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => (
+    {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    }[character]
+  ));
+}
+
 function setState(nextState) {
   state = nextState;
   render();
@@ -64,8 +76,8 @@ function locationButton(location) {
       class="marker ${selected ? "marker--selected" : ""}"
       style="left: ${location.marker.x}%; top: ${location.marker.y}%"
       data-action="select-location"
-      data-location-id="${location.id}"
-      aria-label="Open details for ${location.name}"
+      data-location-id="${escapeHtml(location.id)}"
+      aria-label="Open details for ${escapeHtml(location.name)}"
     >
       <span></span>
     </button>
@@ -77,7 +89,7 @@ function renderSplash() {
     <section class="splash-screen">
       <div class="splash-logo" aria-hidden="true">◎</div>
       <h1>Gods Eye IPA</h1>
-      <p>${state.status}</p>
+      <p>${escapeHtml(state.status)}</p>
     </section>
   `;
 }
@@ -94,23 +106,23 @@ function renderTopBar(selectedLocation) {
           data-role="search"
         />
       </label>
-      <button class="glass-button" data-action="toggle-layers">Layers · ${state.mapStyle}</button>
-      <button class="glass-button" data-action="open-timeline">Time ${state.selectedTime}</button>
+      <button class="glass-button" data-action="toggle-layers">Layers · ${escapeHtml(state.mapStyle)}</button>
+      <button class="glass-button" data-action="open-timeline">Time ${escapeHtml(state.selectedTime)}</button>
       ${
         state.searchQuery
           ? `<div class="search-results">${searchResults
               .map(
                 (location) => `
-                  <button data-action="select-location" data-location-id="${location.id}">
-                    <strong>${location.name}</strong>
-                    <span>${location.coordinates}</span>
+                  <button data-action="select-location" data-location-id="${escapeHtml(location.id)}">
+                    <strong>${escapeHtml(location.name)}</strong>
+                    <span>${escapeHtml(location.coordinates)}</span>
                   </button>
                 `,
               )
               .join("")}</div>`
           : ""
       }
-      <div class="home-status">${selectedLocation.region}</div>
+      <div class="home-status">${escapeHtml(selectedLocation.region)}</div>
     </header>
   `;
 }
@@ -120,11 +132,11 @@ function renderBottomPanel(selectedLocation) {
     <section class="bottom-panel">
       <div>
         <p class="eyebrow">Current location</p>
-        <h2>${selectedLocation.name}</h2>
-        <p>${selectedLocation.coordinates}</p>
+        <h2>${escapeHtml(selectedLocation.name)}</h2>
+        <p>${escapeHtml(selectedLocation.coordinates)}</p>
       </div>
       <div class="quick-actions">
-        <button data-action="select-location" data-location-id="${quickFocusLocationId}">Focus Andes</button>
+        <button data-action="select-location" data-location-id="${escapeHtml(quickFocusLocationId)}">Focus Andes</button>
         <button data-action="open-timeline">Timeline</button>
       </div>
     </section>
@@ -152,19 +164,19 @@ function renderDetailSheet(selectedLocation) {
       <div class="sheet-heading">
         <div>
           <p class="eyebrow">Location detail</p>
-          <h3>${selectedLocation.name}</h3>
-          <p>${selectedLocation.coordinates}</p>
+          <h3>${escapeHtml(selectedLocation.name)}</h3>
+          <p>${escapeHtml(selectedLocation.coordinates)}</p>
         </div>
         <button class="glass-button" data-action="toggle-detail">
           ${state.detailExpanded ? "Minimize" : "Expand"}
         </button>
       </div>
-      <p>${selectedLocation.summary}</p>
+      <p>${escapeHtml(selectedLocation.summary)}</p>
       <dl class="metadata-grid">
-        <div><dt>Region</dt><dd>${selectedLocation.region}</dd></div>
-        <div><dt>Elevation</dt><dd>${selectedLocation.metadata.elevation}</dd></div>
-        <div><dt>Visibility</dt><dd>${selectedLocation.metadata.visibility}</dd></div>
-        <div><dt>Coverage</dt><dd>${selectedLocation.metadata.coverage}</dd></div>
+        <div><dt>Region</dt><dd>${escapeHtml(selectedLocation.region)}</dd></div>
+        <div><dt>Elevation</dt><dd>${escapeHtml(selectedLocation.metadata.elevation)}</dd></div>
+        <div><dt>Visibility</dt><dd>${escapeHtml(selectedLocation.metadata.visibility)}</dd></div>
+        <div><dt>Coverage</dt><dd>${escapeHtml(selectedLocation.metadata.coverage)}</dd></div>
       </dl>
       <div class="sheet-actions">
         <button data-action="toggle-bookmark">${isSaved ? "Remove bookmark" : "Save bookmark"}</button>
@@ -182,7 +194,7 @@ function renderTimeline() {
         <div>
           <p class="eyebrow">Playback</p>
           <h2>Historical timeline</h2>
-          <p>Selected time ${state.selectedTime}</p>
+          <p>Selected time ${escapeHtml(state.selectedTime)}</p>
         </div>
         <button class="glass-button" data-action="close-timeline">Back to globe</button>
       </div>
@@ -205,7 +217,7 @@ function renderTimeline() {
                 data-action="timeline-event"
                 data-time="${event.time}"
               >
-                <span>${event.label}</span>
+                <span>${escapeHtml(event.label)}</span>
               </button>
             `,
           )
@@ -231,9 +243,9 @@ function renderSaved() {
             ? savedLocations
                 .map(
                   (location) => `
-                    <button class="saved-card" data-action="select-location" data-location-id="${location.id}">
-                      <strong>${location.name}</strong>
-                      <span>${location.coordinates}</span>
+                    <button class="saved-card" data-action="select-location" data-location-id="${escapeHtml(location.id)}">
+                      <strong>${escapeHtml(location.name)}</strong>
+                      <span>${escapeHtml(location.coordinates)}</span>
                     </button>
                   `,
                 )
@@ -303,9 +315,9 @@ function renderTabs() {
             <button
               class="${state.activeTab === tab ? "tab-active" : ""}"
               data-action="switch-tab"
-              data-tab="${tab}"
+              data-tab="${escapeHtml(tab)}"
             >
-              ${tab}
+              ${escapeHtml(tab)}
             </button>
           `,
         )
