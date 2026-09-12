@@ -228,7 +228,7 @@ function renderTimeline() {
 }
 
 function renderSaved() {
-  const savedLocations = state.savedLocationIds.map(getLocationById);
+  const savedLocations = locations.filter((location) => state.savedLocationIds.includes(location.id));
   return `
     <section class="panel-screen">
       <div class="panel-header">

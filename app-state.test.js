@@ -40,12 +40,19 @@ test("location selection preserves home flow and resets sheet expansion", () => 
   assert.equal(next.selectedLocationId, locations[1].id);
 });
 
+test("invalid location selection falls back to the default location", () => {
+  const next = selectLocation(createInitialState(), "unknown-location");
+  assert.equal(next.selectedLocationId, locations[0].id);
+});
+
 test("bookmarks can be saved and removed", () => {
   const firstSave = toggleBookmark(createInitialState(), locations[0].id);
   const secondSave = toggleBookmark(firstSave, locations[0].id);
+  const fallbackSave = toggleBookmark(createInitialState(), "missing");
 
   assert.deepEqual(firstSave.savedLocationIds, [locations[0].id]);
   assert.deepEqual(secondSave.savedLocationIds, []);
+  assert.deepEqual(fallbackSave.savedLocationIds, [locations[0].id]);
 });
 
 test("timeline state preserves selected time on open and close", () => {

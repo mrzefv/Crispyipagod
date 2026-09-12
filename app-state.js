@@ -99,11 +99,12 @@ export function finishLoading(state) {
 }
 
 export function selectLocation(state, locationId) {
+  const selectedLocationId = getLocationById(locationId).id;
   return {
     ...state,
     activeTab: "home",
     screen: "home",
-    selectedLocationId: locationId,
+    selectedLocationId,
     detailExpanded: false,
   };
 }
@@ -130,9 +131,10 @@ export function setSearchQuery(state, searchQuery) {
 }
 
 export function toggleBookmark(state, locationId) {
-  const savedLocationIds = state.savedLocationIds.includes(locationId)
-    ? state.savedLocationIds.filter((id) => id !== locationId)
-    : [...state.savedLocationIds, locationId];
+  const selectedLocationId = getLocationById(locationId).id;
+  const savedLocationIds = state.savedLocationIds.includes(selectedLocationId)
+    ? state.savedLocationIds.filter((id) => id !== selectedLocationId)
+    : [...state.savedLocationIds, selectedLocationId];
 
   return {
     ...state,
