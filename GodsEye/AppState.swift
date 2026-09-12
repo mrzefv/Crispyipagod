@@ -541,6 +541,9 @@ final class AppState: ObservableObject {
                 selected = Entity.place(lat: la, lon: lo, name: title, detail: "Shared target", distance: 20_000)
                 pendingDeepLinkSelection = nil
                 pendingSelectionResolveAttempts = 0
+            } else if pendingSelectionResolveAttempts >= 3 {
+                pendingDeepLinkSelection = nil
+                pendingSelectionResolveAttempts = 0
             }
             return
         }

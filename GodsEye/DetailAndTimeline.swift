@@ -80,10 +80,10 @@ struct DetailSheet: View {
             ActionChip(icon: "clock.arrow.circlepath", title: "Timeline", active: false) {
                 s.openTimeline(at: entity.time)
             }
-            ShareLink(item: s.shareURL(for: entity)?.absoluteString ?? entity.shareText) {
+            ShareLink(item: [entity.shareText, s.shareURL(for: entity)?.absoluteString].compactMap { $0 }.joined(separator: "\n\n")) {
                 HStack(spacing: 6) {
                     Image(systemName: "square.and.arrow.up")
-                    Text("Share Link").font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    Text("Share").font(.system(size: 12, weight: .semibold, design: .monospaced))
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)

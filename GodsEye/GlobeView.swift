@@ -133,6 +133,9 @@ struct GlobeView: View {
     }
 
     private var showContactLabels: Bool { s.showLabels && s.distance < 250_000 }
+    private var hudAircraftCount: Int { (s.layers.contains(.flights) || s.layers.contains(.military)) ? s.visibleContacts.count : 0 }
+    private var hudSatelliteCount: Int { s.layers.contains(.satellites) ? s.visibleSatellites.count : 0 }
+    private var hudCameraCount: Int { s.layers.contains(.cameras) ? s.visibleCameras.count : 0 }
 
     private func quakeSize(_ q: Quake) -> CGFloat {
         CGFloat(6 + max(0, q.mag - 1) * 3.2)
@@ -171,7 +174,7 @@ struct GlobeView: View {
         VStack {
             HStack {
                 if s.detectionOverlay {
-                    Text("DETECT \(s.visibleContacts.count) AC · \(s.visibleSatellites.count) SAT · \(s.visibleCameras.count) CAM")
+                    Text("DETECT \(hudAircraftCount) AC · \(hudSatelliteCount) SAT · \(hudCameraCount) CAM")
                         .font(.caption.monospaced().bold())
                         .lineLimit(2)
                         .minimumScaleFactor(0.7)
@@ -180,7 +183,7 @@ struct GlobeView: View {
                         .overlay(Capsule().stroke(s.accent.opacity(0.6), lineWidth: 0.8))
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("Detection overlay counts")
-                        .accessibilityValue("\(s.visibleContacts.count) aircraft, \(s.visibleSatellites.count) satellites, \(s.visibleCameras.count) cameras")
+                        .accessibilityValue("\(hudAircraftCount) aircraft, \(hudSatelliteCount) satellites, \(hudCameraCount) cameras")
                 }
                 Spacer()
                 if s.tacticalHUD, let t = s.trackedEntity {
