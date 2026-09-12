@@ -426,7 +426,6 @@ final class Feeds {
     func parcelRecords(query: String, near center: CLLocationCoordinate2D, limit: Int = 10) async throws -> [ParcelRecord] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard q.count >= 2 else { return [] }
-        let enc = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
         let rawLeftLon = center.longitude - 1.2
         let rawRightLon = center.longitude + 1.2
         let topLat = min(90, center.latitude + 1.0)
@@ -438,7 +437,21 @@ final class Feeds {
         let latKey = String(format: "%.2f", locale: posix, center.latitude)
         let lonKey = String(format: "%.2f", locale: posix, center.longitude)
         let cacheKey = "parcel-\(String(key.prefix(40)).ifEmpty("search"))-\(latKey)-\(lonKey).json"
-        let base = "https://nominatim.openstreetmap.org/search?q=\(enc)&format=jsonv2&addressdetails=1&extratags=1&dedupe=1&limit=\(max(1, min(limit, 30)))"
+        let limitValue = String(max(1, min(limit, 30)))
+        func makeURL(viewbox: String) -> String {
+            var c = URLComponents(string: "https://nominatim.openstreetmap.org/search")
+            c?.queryItems = [
+                URLQueryItem(name: "q", value: q),
+                URLQueryItem(name: "format", value: "jsonv2"),
+                URLQueryItem(name: "addressdetails", value: "1"),
+                URLQueryItem(name: "extratags", value: "1"),
+                URLQueryItem(name: "dedupe", value: "1"),
+                URLQueryItem(name: "limit", value: limitValue),
+                URLQueryItem(name: "viewbox", value: viewbox),
+                URLQueryItem(name: "bounded", value: "1")
+            ]
+            return c?.url?.absoluteString ?? "https://nominatim.openstreetmap.org/search"
+        }
         let boxes: [(name: String, left: Double, right: Double)] = {
             if rawLeftLon < -180 {
                 return [
@@ -488,7 +501,7 @@ final class Feeds {
             let rightLon = box.right
             let bottomLatBox = bottomLat
             let viewbox = String(format: "%.5f,%.5f,%.5f,%.5f", locale: posix, leftLon, topLatBox, rightLon, bottomLatBox)
-            let d = try await fetch(base + "&viewbox=\(viewbox)&bounded=1", cache: "\(cacheKey)-\(box.name)-\(idx)")
+            let d = try await fetch(makeURL(viewbox: viewbox), cache: "\(cacheKey)-\(box.name)-\(idx)")
             guard let arr = try JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { continue }
             for r in parse(arr) where !seen.contains(r.id) {
                 seen.insert(r.id)
