@@ -984,7 +984,9 @@ struct SearchSheet: View {
 
     private func schedule(_ q: String) {
         searchTask?.cancel()
+        searchTask = nil
         parcelTask?.cancel()
+        parcelTask = nil
         searchGeneration += 1
         let generation = searchGeneration
         let trimmed = q.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -996,7 +998,10 @@ struct SearchSheet: View {
             parcelTask = Task {
                 func finish() async {
                     await MainActor.run {
-                        if searchGeneration == generation { parcelSearching = false }
+                        if searchGeneration == generation {
+                            parcelSearching = false
+                            parcelTask = nil
+                        }
                     }
                 }
                 try? await Task.sleep(nanoseconds: 500_000_000)
@@ -1016,11 +1021,13 @@ struct SearchSheet: View {
                 await MainActor.run {
                     parcels = Array(parcel.prefix(10))
                     parcelSearching = false
+                    parcelTask = nil
                 }
             }
         } else {
             parcels = []
             parcelSearching = false
+            parcelTask = nil
         }
         searchTask = Task {
             func finish() async {
