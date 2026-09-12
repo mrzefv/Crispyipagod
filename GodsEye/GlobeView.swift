@@ -852,6 +852,7 @@ struct SearchSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var places: [MKMapItem] = []
+    @State private var parcels: [ParcelRecord] = []
     @State private var searching = false
     @State private var searchTask: Task<Void, Never>?
 
@@ -916,6 +917,20 @@ struct SearchSheet: View {
                         Text("No places yet — try an airport, city, or landmark.").font(.footnote).foregroundStyle(.secondary)
                     }
                 }
+                if !parcels.isEmpty || (query.count >= 2 && !searching) {
+                    Section("Parcels / owner records") {
+                        ForEach(parcels) { p in
+                            Button { pickParcel(p) } label: {
+                                row(icon: "building.2.crop.circle", color: .teal,
+                                    title: p.title,
+                                    sub: [p.owner.map { "Owner: \($0)" }, p.address].compactMap { $0 }.joined(separator: " · "))
+                            }
+                        }
+                        if parcels.isEmpty && !searching {
+                            Text("No parcel/owner matches for this query yet.").font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                }
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
@@ -939,7 +954,7 @@ struct SearchSheet: View {
     private func schedule(_ q: String) {
         searchTask?.cancel()
         let trimmed = q.trimmingCharacters(in: .whitespaces)
-        guard trimmed.count >= 2 else { places = []; return }
+        guard trimmed.count >= 2 else { places = []; parcels = []; return }
         searching = true
         searchTask = Task {
             try? await Task.sleep(nanoseconds: 350_000_000)
@@ -948,9 +963,13 @@ struct SearchSheet: View {
             req.naturalLanguageQuery = trimmed
             req.resultTypes = [.pointOfInterest, .address]
             req.region = MKCoordinateRegion(center: s.center, span: MKCoordinateSpan(latitudeDelta: 60, longitudeDelta: 60))
-            let resp = try? await MKLocalSearch(request: req).start()
+            async let placeResp = try? MKLocalSearch(request: req).start()
+            async let parcelResp = try? Feeds.shared.parcelRecords(query: trimmed, near: s.center)
+            let resp = await placeResp
+            let parcel = await parcelResp
             guard !Task.isCancelled else { return }
             places = Array((resp?.mapItems ?? []).prefix(12))
+            parcels = Array((parcel ?? []).prefix(10))
             searching = false
         }
     }
@@ -968,6 +987,33 @@ struct SearchSheet: View {
         Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
             s.select(Entity.place(lat: c.latitude, lon: c.longitude, name: name, detail: detail, distance: item.pointOfInterestCategory == .airport ? 12_000 : 6_000))
+        }
+
+        private func pickParcel(_ p: ParcelRecord) {
+            let subtitle = p.owner.map { "Owner: \($0)" } ?? "Parcel record"
+            let e = Entity(
+                id: "parcel-\(p.id)",
+                kind: .place,
+                title: p.title,
+                subtitle: subtitle,
+                summary: p.address,
+                lat: p.lat,
+                lon: p.lon,
+                time: nil,
+                meta: [
+                    MetaRow("Parcel ID", p.parcelID),
+                    MetaRow("Address", p.address),
+                    MetaRow("Owner", p.owner ?? "—"),
+                    MetaRow("Source", "OpenStreetMap Nominatim")
+                ],
+                url: "https://www.openstreetmap.org/?mlat=\(p.lat)&mlon=\(p.lon)#map=18/\(p.lat)/\(p.lon)",
+                viewDistance: 2_500
+            )
+            dismiss()
+            Task {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                s.select(e)
+            }
         }
     }
 }

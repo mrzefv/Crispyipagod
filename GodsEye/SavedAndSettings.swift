@@ -207,7 +207,7 @@ struct SettingsView: View {
                     LabeledContent("Build", value: "MRzefv")
                     LabeledContent("Deep links", value: "godseye://view?…")
                     LabeledContent("Inspired by", value: "gods-eye-view (MIT)")
-                    Text("Exploratory visualization of public data. Feeds may be delayed, incomplete, or wrong. Not for flight, maritime, emergency, or other safety-critical use. No people tracking — assets, events, and infrastructure only.")
+                    Text("Exploratory visualization of public data. Feeds may be delayed, incomplete, or wrong. Not for flight, maritime, emergency, or other safety-critical use. No live people tracking — parcel owner fields come from public map metadata and may be incomplete.")
                         .font(.caption).foregroundStyle(.secondary)
                 } header: { Text("About") }
             }

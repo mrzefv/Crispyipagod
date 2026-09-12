@@ -421,6 +421,52 @@ final class Feeds {
         return rings
     }
 
+    // MARK: Nominatim parcel/address/owner search (keyless)
+
+    func parcelRecords(query: String, near center: CLLocationCoordinate2D, limit: Int = 10) async throws -> [ParcelRecord] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard q.count >= 2 else { return [] }
+        let enc = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
+        let west = center.longitude - 1.2
+        let east = center.longitude + 1.2
+        let south = center.latitude - 1.0
+        let north = center.latitude + 1.0
+        let viewbox = String(format: "%.5f,%.5f,%.5f,%.5f", west, north, east, south)
+        let key = q.lowercased()
+            .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        let cacheKey = "parcel-\(String(key.prefix(48)).ifEmpty("search")).json"
+        let url = "https://nominatim.openstreetmap.org/search?q=\(enc)&format=jsonv2&addressdetails=1&extratags=1&limit=\(max(1, min(limit, 30)))&viewbox=\(viewbox)&bounded=0"
+        let d = try await fetch(url, cache: cacheKey)
+        guard let arr = try JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { throw FeedError.badResponse }
+        return arr.compactMap { row in
+            guard let la = row["lat"] as? String, let lo = row["lon"] as? String,
+                  let lat = Double(la), let lon = Double(lo) else { return nil }
+            let display = row["display_name"] as? String ?? "Unknown address"
+            let name = row["name"] as? String
+            let ext = row["extratags"] as? [String: Any]
+            let addr = row["address"] as? [String: Any]
+            let osmType = (row["osm_type"] as? String ?? "?").uppercased()
+            let osmID = String(describing: row["osm_id"] ?? "")
+            let parcelID = "\(osmType.prefix(1))\(osmID)"
+            let house = (addr?["house_number"] as? String).ifEmpty(name ?? "")
+            let road = (addr?["road"] as? String).ifEmpty(addr?["pedestrian"] as? String ?? "")
+            let fallbackTitle = [house, road].filter { !$0.isEmpty }.joined(separator: " ")
+            let owner = (ext?["owner"] as? String).ifEmpty((ext?["operator"] as? String).ifEmpty(ext?["contact:person"] as? String ?? ""))
+            return ParcelRecord(
+                id: parcelID.isEmpty ? "parcel-\(lat)-\(lon)" : parcelID,
+                parcelID: parcelID.ifEmpty("—"),
+                title: (name ?? "").ifEmpty(fallbackTitle.ifEmpty(display.components(separatedBy: ",").first?.trimmingCharacters(in: .whitespaces) ?? "Property record")),
+                address: display,
+                owner: owner.isEmpty ? nil : owner,
+                lat: lat,
+                lon: lon
+            )
+        }
+        .prefix(limit)
+        .map { $0 }
+    }
+
     // MARK: Anthropic HUD summary (user key)
 
     func aiSummary(key: String, model: String, context: String) async throws -> String {

@@ -1230,6 +1230,16 @@ struct Entity: Identifiable, Equatable {
     }
 }
 
+struct ParcelRecord: Identifiable, Equatable {
+    let id: String
+    let parcelID: String
+    let title: String
+    let address: String
+    let owner: String?
+    let lat: Double
+    let lon: Double
+}
+
 // MARK: - Bookmarks
 
 struct Bookmark: Identifiable, Codable, Equatable {
