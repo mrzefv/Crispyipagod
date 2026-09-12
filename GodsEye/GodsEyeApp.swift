@@ -18,8 +18,6 @@ struct GodsEyeApp: App {
 
 struct RootView: View {
     @EnvironmentObject var s: AppState
-    @Environment(\.scenePhase) private var scenePhase
-
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -32,13 +30,6 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.7), value: s.ready)
         .task { await s.boot() }
         .onReceive(s.location.$coordinate) { c in if c != nil && s.alertISS { s.computePasses() } }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
-                s.cctv.resume()
-            } else if phase == .background {
-                s.cctv.stop()
-            }
-        }
     }
 }
 

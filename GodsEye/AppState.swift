@@ -259,7 +259,6 @@ final class AppState: ObservableObject {
         ais.onShip = { [weak self] ship in self?.ingest(ship) }
         ais.onStatus = { [weak self] st in self?.aisStatus = st }
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
-        cctv.onChange = { [weak self] in self?.objectWillChange.send() }
         cctv.cameraLookup = { [weak self] id in self?.cameras.first { $0.id == id } }
     }
 
