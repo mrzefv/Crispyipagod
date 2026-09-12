@@ -166,6 +166,7 @@ final class AppState: ObservableObject {
     @Published var liveCamera: Camera?
     @Published var intel: [String: PlaceIntel] = [:]
     @Published var intelLoading: Set<String> = []
+    @Published var propertyLines: [ParcelPolygon] = []   // parcel + footprint polygons for the last looked-up place
     private var orbitTask: Task<Void, Never>?
     private var replayTask: Task<Void, Never>?
     private var sceneTask: Task<Void, Never>?
@@ -282,7 +283,10 @@ final class AppState: ObservableObject {
 
     func lookupIntel(for e: Entity, force: Bool = false) {
         guard e.kind == .place else { return }
-        if !force, let cached = intel[e.id], Date().timeIntervalSince(cached.fetchedAt) < 1800 { return }
+        if !force, let cached = intel[e.id], Date().timeIntervalSince(cached.fetchedAt) < 1800 {
+            if !cached.polygons.isEmpty { propertyLines = cached.polygons }
+            return
+        }
         guard !intelLoading.contains(e.id) else { return }
         intelLoading.insert(e.id)
         let coord = e.coord
@@ -291,6 +295,8 @@ final class AppState: ObservableObject {
             let result = await Feeds.shared.placeIntel(at: coord)
             intel[id] = result
             intelLoading.remove(id)
+            if !result.polygons.isEmpty { propertyLines = result.polygons }
+            if let svc = result.parcelService { show("Property lines · \(svc)") }
             if intel.count > 40 {
                 let oldest = intel.sorted { $0.value.fetchedAt < $1.value.fetchedAt }.prefix(intel.count - 40).map(\.key)
                 for k in oldest { intel[k] = nil }

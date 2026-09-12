@@ -339,6 +339,21 @@ struct GlobeView: View {
             .annotationTitles(.hidden)
         }
 
+        // Property lines (county parcels) + OSM building footprint for the last looked-up place
+        ForEach(s.propertyLines) { poly in
+            ForEach(Array(poly.rings.enumerated()), id: \.offset) { ring in
+                if poly.kind == .building {
+                    MapPolygon(coordinates: ring.element)
+                        .foregroundStyle(Color.cyan.opacity(0.10))
+                        .stroke(Color.cyan.opacity(0.9), style: StrokeStyle(lineWidth: 1.5, dash: [3, 3]))
+                } else {
+                    MapPolygon(coordinates: ring.element)
+                        .foregroundStyle(poly.isTarget ? Color.yellow.opacity(0.18) : Color.clear)
+                        .stroke(poly.isTarget ? Color.yellow : Color.yellow.opacity(0.55), lineWidth: poly.isTarget ? 2.5 : 1)
+                }
+            }
+        }
+
         // Camera viewsheds
         if s.viewsheds, s.layers.contains(.cctv), s.distance < 6_000 {
             ForEach(s.visibleCameras) { cam in
@@ -794,29 +809,55 @@ struct BottomPanel: View {
                 }
             }
 
+            // One row. Tap = primary action. Press & hold = grouped menu (system haptic).
             HStack(spacing: 6) {
-                QuickAction(icon: "location.fill", title: "Locate") { s.locateMe() }
-                QuickAction(icon: "globe", title: "Reset") { s.resetGlobe() }
-                QuickAction(icon: "list.bullet.rectangle", title: "Contacts") { s.showRoster = true }
-                QuickAction(icon: "camera.aperture", title: "Modes", active: s.sensor != .normal || s.hud || s.detection) { showModes = true }
-                QuickAction(icon: s.directing ? "stop.fill" : "film", title: "Director", active: s.directing) { s.toggleDirector() }
-                QuickAction(icon: "square.3.layers.3d", title: "Layers") { showLayers = true }
-            }
-            HStack(spacing: 6) {
-                QuickAction(icon: "ruler", title: "Measure", active: s.measureMode) { if s.measureMode { s.clearMeasure() } else { s.toggleMeasure() } }
-                QuickAction(icon: "rotate.3d", title: "Orbit", active: s.orbiting) { s.toggleOrbit() }
-                QuickAction(icon: "radio", title: "Radio", active: s.radio.playing) { s.showRadio = true }
-                QuickAction(icon: "record.circle", title: "Scenes", active: s.scenePlaying) { s.showScenes = true }
-                QuickAction(icon: "qrcode", title: "QR") { s.showQR = true }
-                QuickAction(icon: "arrow.clockwise", title: "Refresh") { Task { await s.refreshAll() } }
-            }
-            HStack(spacing: 6) {
-                QuickAction(icon: "cloud.rain", title: "Radar", active: s.layers.contains(.radar)) { if !s.layers.contains(.radar) { s.layers.insert(.radar) }; s.showRadar = true }
-                QuickAction(icon: "sun.max", title: "Space", active: s.layers.contains(.space)) { if !s.layers.contains(.space) { s.layers.insert(.space) }; s.showSpace = true }
-                QuickAction(icon: "antenna.radiowaves.left.and.right", title: "Scanner", active: s.scannerNow != nil) { if !s.layers.contains(.scanner) { s.layers.insert(.scanner) }; s.showScanner = true }
-                QuickAction(icon: "chart.xyaxis.line", title: "Profile") { s.loadProfile() }
-                QuickAction(icon: "exclamationmark.triangle", title: "Alerts", active: s.layers.contains(.alerts)) { if s.layers.contains(.alerts) { s.layers.remove(.alerts) } else { s.layers.insert(.alerts) } }
-                QuickAction(icon: "train.side.front.car", title: "Trains", active: s.layers.contains(.trains)) { if s.layers.contains(.trains) { s.layers.remove(.trains) } else { s.layers.insert(.trains) } }
+                HoldAction(icon: "location.fill", title: "Locate", primary: { s.locateMe() }) {
+                    Button { s.locateMe() } label: { Label("Locate me", systemImage: "location.fill") }
+                    Button { s.resetGlobe() } label: { Label("Reset globe", systemImage: "globe") }
+                    Button { s.toggleOrbit() } label: { Label(s.orbiting ? "Stop orbit" : "Orbit here", systemImage: "rotate.3d") }
+                    Button { if s.measureMode { s.clearMeasure() } else { s.toggleMeasure() } } label: { Label(s.measureMode ? "Clear measure" : "Measure", systemImage: "ruler") }
+                    Button { s.loadProfile() } label: { Label("Elevation profile", systemImage: "chart.xyaxis.line") }
+                    Button { s.showQR = true } label: { Label("QR / deep link", systemImage: "qrcode") }
+                }
+                HoldAction(icon: "list.bullet.rectangle", title: "Contacts", primary: { s.showRoster = true }) {
+                    Button { s.showRoster = true } label: { Label("Contacts roster", systemImage: "list.bullet.rectangle") }
+                    Toggle(isOn: layerBinding(.trains)) { Label("Live trains", systemImage: "train.side.front.car") }
+                    Toggle(isOn: layerBinding(.alerts)) { Label("Alerts", systemImage: "exclamationmark.triangle") }
+                    Toggle(isOn: $s.showLabels) { Label("Labels", systemImage: "tag") }
+                    Toggle(isOn: $s.wakes) { Label("Wakes", systemImage: "wind") }
+                    Button { Task { await s.refreshAll() } } label: { Label("Refresh feeds", systemImage: "arrow.clockwise") }
+                }
+                HoldAction(icon: "camera.aperture", title: "Modes", active: s.sensor != .normal || s.hud || s.detection, primary: { showModes = true }) {
+                    Button { showModes = true } label: { Label("Modes sheet", systemImage: "camera.aperture") }
+                    Picker("Sensor", selection: $s.sensor) {
+                        ForEach(SensorMode.allCases) { m in Text(m.title).tag(m) }
+                    }
+                    Toggle(isOn: $s.hud) { Label("Military HUD", systemImage: "scope") }
+                    Toggle(isOn: $s.detection) { Label("Detection boxes", systemImage: "viewfinder") }
+                }
+                HoldAction(icon: s.directing ? "stop.fill" : "film", title: "Director", active: s.directing || s.scenePlaying, primary: { s.toggleDirector() }) {
+                    Button { s.toggleDirector() } label: { Label(s.directing ? "Stop director" : "Start director", systemImage: s.directing ? "stop.fill" : "film") }
+                    Button { s.showScenes = true } label: { Label("Scenes", systemImage: "record.circle") }
+                    Button { s.toggleOrbit() } label: { Label(s.orbiting ? "Stop orbit" : "Orbit", systemImage: "rotate.3d") }
+                }
+                HoldAction(icon: "radio", title: "Audio", active: s.radio.playing || s.scannerNow != nil, primary: { s.showRadio = true }) {
+                    Button { s.showRadio = true } label: { Label("World radio", systemImage: "radio") }
+                    Button { if !s.layers.contains(.scanner) { s.layers.insert(.scanner) }; s.showScanner = true } label: { Label("Scanner feeds", systemImage: "antenna.radiowaves.left.and.right") }
+                    Button { s.voice.toggle() } label: { Label(s.voice.listening ? "Stop listening" : "Voice command", systemImage: "mic") }
+                }
+                HoldAction(icon: "square.3.layers.3d", title: "Layers", active: s.layers.contains(.radar) || s.layers.contains(.space), primary: { showLayers = true }) {
+                    Button { showLayers = true } label: { Label("Layers sheet", systemImage: "square.3.layers.3d") }
+                    if !s.propertyLines.isEmpty {
+                        Button(role: .destructive) { s.propertyLines = [] } label: { Label("Clear property lines", systemImage: "rectangle.dashed") }
+                    }
+                    Button { if !s.layers.contains(.radar) { s.layers.insert(.radar) }; s.showRadar = true } label: { Label("Weather radar", systemImage: "cloud.rain") }
+                    Button { if !s.layers.contains(.space) { s.layers.insert(.space) }; s.showSpace = true } label: { Label("Space weather", systemImage: "sun.max") }
+                    Toggle(isOn: layerBinding(.cctv)) { Label("Public CCTV", systemImage: "video") }
+                    Toggle(isOn: layerBinding(.flights)) { Label("Flights", systemImage: "airplane") }
+                    Toggle(isOn: layerBinding(.ships)) { Label("Ships", systemImage: "ferry") }
+                    Toggle(isOn: layerBinding(.satellites)) { Label("Satellites", systemImage: "sparkle") }
+                    Toggle(isOn: layerBinding(.quakes)) { Label("Earthquakes", systemImage: "waveform.path.ecg") }
+                }
             }
         }
         .padding(10)
@@ -824,6 +865,10 @@ struct BottomPanel: View {
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.12), lineWidth: 0.5))
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
+    }
+
+    private func layerBinding(_ l: Layer) -> Binding<Bool> {
+        Binding(get: { s.layers.contains(l) }, set: { on in if on { s.layers.insert(l) } else { s.layers.remove(l) } })
     }
 
     private var altitudeText: String {
@@ -842,6 +887,41 @@ struct BottomPanel: View {
         if s.layers.contains(.cctv) { parts.append("\(s.visibleCameras.count) CAM") }
         if let t = s.lastUpdate { parts.append(Fmt.rel.localizedString(for: t, relativeTo: Date())) }
         return parts.joined(separator: " · ")
+    }
+}
+
+/// Tap = primary action (with impact haptic). Press & hold = grouped menu (system haptic + list).
+struct HoldAction<Items: View>: View {
+    let icon: String
+    let title: String
+    var active = false
+    let primary: () -> Void
+    @ViewBuilder let items: () -> Items
+
+    init(icon: String, title: String, active: Bool = false, primary: @escaping () -> Void, @ViewBuilder items: @escaping () -> Items) {
+        self.icon = icon; self.title = title; self.active = active; self.primary = primary; self.items = items
+    }
+
+    var body: some View {
+        Menu {
+            items()
+        } label: {
+            VStack(spacing: 3) {
+                Image(systemName: icon).font(.system(size: 14, weight: .semibold))
+                Text(title).font(.system(size: 8, weight: .medium, design: .monospaced)).lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+            .foregroundStyle(active ? Color.black : Color.primary)
+            .background(RoundedRectangle(cornerRadius: 10).fill(active ? AnyShapeStyle(.tint) : AnyShapeStyle(.white.opacity(0.06))))
+            .contentShape(RoundedRectangle(cornerRadius: 10))
+        } primaryAction: {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            primary()
+        }
+        .menuOrder(.fixed)
+        .menuStyle(.button)
+        .buttonStyle(.plain)
     }
 }
 

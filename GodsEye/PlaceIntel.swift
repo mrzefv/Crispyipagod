@@ -15,6 +15,8 @@ struct IntelSection: Identifiable, Equatable {
 struct PlaceIntel: Equatable {
     var sections: [IntelSection] = []
     var owner: String? = nil          // best-effort owner / operator for the parcel or building
+    var polygons: [ParcelPolygon] = []   // parcel property lines (+ OSM building footprint) for the map
+    var parcelService: String? = nil
     var fetchedAt = Date()
     var errors: [String] = []
     var isEmpty: Bool { sections.isEmpty }
@@ -74,15 +76,22 @@ extension Feeds {
 
     /// Everything public we can find about a point, fetched concurrently.
     func placeIntel(at c: CLLocationCoordinate2D) async -> PlaceIntel {
+        async let parcel = parcelLookup(c)
         async let nominatim = nominatimReverse(c)
         async let overpass = overpassAround(c)
         async let census = censusGeographies(c)
         async let wiki = wikipediaNearby(c)
+        async let footprint = osmFootprint(c)
 
         var out = PlaceIntel()
+        let pr = await parcel
+        if let sec = pr.section { out.sections.append(sec) }
+        out.polygons = pr.polygons
+        out.parcelService = pr.serviceName
         let results: [(String, Result<[IntelSection], Error>)] = [
             ("OSM", await nominatim), ("Overpass", await overpass), ("Census", await census), ("Wikipedia", await wiki)
         ]
+        if let fp = await footprint { out.polygons.append(fp) }
         for (name, r) in results {
             switch r {
             case .success(let secs): out.sections += secs
@@ -91,6 +100,23 @@ extension Feeds {
         }
         out.owner = out.sections.flatMap(\.rows).first { ["Owner", "Operator"].contains($0.key) }?.value
         return out
+    }
+
+    // MARK: OSM building footprint under the point (drawn alongside parcel lines)
+
+    private func osmFootprint(_ c: CLLocationCoordinate2D) async -> ParcelPolygon? {
+        let posix = Locale(identifier: "en_US_POSIX")
+        let url = String(format: "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=%.6f&lon=%.6f&zoom=18&polygon_geojson=1", locale: posix, c.latitude, c.longitude)
+        guard let d = try? await intelGET(url, cache: "intel-fp-\(Feeds.key(c)).json"),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let g = j["geojson"] as? [String: Any], let type = g["type"] as? String else { return nil }
+        var rings: [[CLLocationCoordinate2D]] = []
+        func ring(_ r: [[Double]]) -> [CLLocationCoordinate2D] { r.compactMap { $0.count >= 2 ? CLLocationCoordinate2D(latitude: $0[1], longitude: $0[0]) : nil } }
+        if type == "Polygon", let cs = g["coordinates"] as? [[[Double]]] { rings = cs.map(ring) }
+        else if type == "MultiPolygon", let cs = g["coordinates"] as? [[[[Double]]]] { rings = cs.flatMap { $0.map(ring) } }
+        guard let outer = rings.first, outer.count > 2 else { return nil }
+        let id = "fp-\(j["osm_type"] as? String ?? "")\(String(describing: j["osm_id"] ?? ""))"
+        return ParcelPolygon(id: id, kind: .building, rings: rings, attributes: [:], isTarget: true)
     }
 
     // MARK: Nominatim reverse (address + extratags: owner/operator/building/etc.)
