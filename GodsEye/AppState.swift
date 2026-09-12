@@ -63,7 +63,7 @@ final class AppState: ObservableObject {
             if layers.contains(.space) { Task { await refreshSpace() } }
             if layers.contains(.scanner) && scanners.isEmpty { Task { await refreshScanners() } }
             if layers.contains(.peaks) { Task { await refreshPeaks() } }
-            if layers.contains(.residential) { Task { await refreshResidentialBlueprints() } }
+            if layers.contains(.residential), distance < 8_000 { Task { await refreshResidentialBlueprints() } }
         }
     }
     @Published var contacts: [Contact] = [] { didSet { rebuildDisplay(); trackTick(fromPoll: true) } }
@@ -641,7 +641,7 @@ final class AppState: ObservableObject {
         await refreshContacts(force: true)
         if layers.contains(.military) { await refreshMilitary() }
         if layers.contains(.cctv) { await refreshCameras() }
-        if layers.contains(.residential) { await refreshResidentialBlueprints() }
+        if layers.contains(.residential), distance < 8_000 { await refreshResidentialBlueprints() }
         rebuildDisplay()
         status = "Online"
         location.request()
@@ -809,7 +809,7 @@ final class AppState: ObservableObject {
         if layers.contains(.bikeshare) { await refreshBikes() }
         if layers.contains(.infra) { await refreshInfra() }
         if layers.contains(.airport) { await refreshAirport() }
-        if layers.contains(.residential) { await refreshResidentialBlueprints() }
+        if layers.contains(.residential), distance < 8_000 { await refreshResidentialBlueprints() }
         await refreshContacts(force: true)
         await refreshQuakes()
         await refreshISS()
@@ -881,7 +881,7 @@ final class AppState: ObservableObject {
                 if layers.contains(.rail) { await refreshRail() }
                 if layers.contains(.stations) { await refreshStations() }
                 if layers.contains(.peaks) { await refreshPeaks() }
-                if layers.contains(.residential) { await refreshResidentialBlueprints() }
+                if layers.contains(.residential), distance < 8_000 { await refreshResidentialBlueprints() }
             }
         }
         rebuildRadar()
