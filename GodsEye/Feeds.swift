@@ -360,14 +360,16 @@ final class Feeds {
 
     func residentialBlueprints(center c: CLLocationCoordinate2D, spanDeg: Double) async throws -> [ResidentialBlueprint] {
         let s = max(0.006, min(spanDeg, 0.018))
+        let posix = Locale(identifier: "en_US_POSIX")
         let bbox = String(format: "%.4f,%.4f,%.4f,%.4f", c.latitude - s, c.longitude - s * 1.35, c.latitude + s, c.longitude + s * 1.35)
+        let cacheKey = String(format: "residential-blueprints-%.3f-%.3f-%.3f.json", locale: posix, c.latitude, c.longitude, s)
         let q = """
         [out:json][timeout:20];(
           way["building"~"^(house|detached|semidetached_house|terrace|apartments|residential)$"](\(bbox));
           relation["building"~"^(house|detached|semidetached_house|terrace|apartments|residential)$"](\(bbox));
         );out geom 700;
         """
-        let r = try await overpass(q, cache: "residential-blueprints.json")
+        let r = try await overpass(q, cache: cacheKey)
         return Array(r.elements.compactMap(\.value).compactMap { e in
             guard let g = e.geometry, g.count > 2, let value = e.tags?["building"] else { return nil }
             let kind: ResidentialBlueprint.Kind

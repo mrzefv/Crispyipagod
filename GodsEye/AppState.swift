@@ -230,6 +230,7 @@ final class AppState: ObservableObject {
     private var geocoder = CLGeocoder()
     private var geocodeTask: Task<Void, Never>?
     private var pendingDeepLink: URL?
+    private var residentialFetchID = 0
 
     init() {
         let ud = UserDefaults.standard
@@ -491,7 +492,22 @@ final class AppState: ObservableObject {
     }
     func refreshResidentialBlueprints() async {
         guard layers.contains(.residential), distance < 8_000 else { residentialBlueprints = []; return }
-        do { residentialBlueprints = try await Feeds.shared.residentialBlueprints(center: center, spanDeg: max(0.006, distance / 550_000)) } catch { feedErrors += 1 }
+        residentialFetchID += 1
+        let fetchID = residentialFetchID
+        let requestedCenter = center
+        let requestedDistance = distance
+        let span = max(0.006, requestedDistance / 550_000)
+        do {
+            let fetched = try await Feeds.shared.residentialBlueprints(center: requestedCenter, spanDeg: span)
+            guard fetchID == residentialFetchID,
+                  layers.contains(.residential),
+                  distance < 8_000,
+                  center.distance(to: requestedCenter) < max(requestedDistance * 0.35, 400),
+                  abs(distance - requestedDistance) < max(requestedDistance * 0.35, 600) else { return }
+            residentialBlueprints = fetched
+        } catch {
+            if fetchID == residentialFetchID { feedErrors += 1 }
+        }
     }
     func refreshHazards() async {
         let nn = (try? await Feeds.shared.nwsAlerts()) ?? []
