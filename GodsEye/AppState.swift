@@ -341,6 +341,15 @@ final class AppState: ObservableObject {
         }
     }
 
+    var accentHex: String {
+        switch accentRaw {
+        case "amber": return "#ffad1a"
+        case "cyan": return "#32d4ff"
+        case "white": return "#ffffff"
+        default: return "#59ff73"
+        }
+    }
+
     var mapStyle: MapStyle {
         let elev: MapStyle.Elevation = performanceMode ? .flat : .realistic
         let traffic = layers.contains(.traffic)
