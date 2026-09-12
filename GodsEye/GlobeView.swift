@@ -915,7 +915,7 @@ struct SearchSheet: View {
                                 sub: item.placemark.title ?? Fmt.coord(item.placemark.coordinate.latitude, item.placemark.coordinate.longitude))
                         }
                     }
-                    if places.isEmpty && !searching && trimmedQuery.count >= 2 {
+                    if places.isEmpty && parcels.isEmpty && !searching && trimmedQuery.count >= 2 {
                         Text("No places yet — try an airport, city, or landmark.").font(.footnote).foregroundStyle(.secondary)
                     }
                 }
@@ -951,12 +951,12 @@ struct SearchSheet: View {
     }
 
     private func schedule(_ q: String) {
-        searchTask?.cancel()
         let trimmed = q.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 2 else { places = []; parcels = []; searching = false; activeSearchID = nil; return }
         let originCenter = s.center
         let searchID = UUID()
         activeSearchID = searchID
+        searchTask?.cancel()
         searching = true
         searchTask = Task {
             func finish() async {

@@ -434,8 +434,9 @@ final class Feeds {
         let key = q.lowercased()
             .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
-        let latKey = String(format: "%.2f", center.latitude)
-        let lonKey = String(format: "%.2f", center.longitude)
+        let posix = Locale(identifier: "en_US_POSIX")
+        let latKey = String(format: "%.2f", locale: posix, center.latitude)
+        let lonKey = String(format: "%.2f", locale: posix, center.longitude)
         let cacheKey = "parcel-\(String(key.prefix(40)).ifEmpty("search"))-\(latKey)-\(lonKey).json"
         let base = "https://nominatim.openstreetmap.org/search?q=\(enc)&format=jsonv2&addressdetails=1&extratags=1&dedupe=1&limit=\(max(1, min(limit, 30)))"
         let boxes: [(name: String, left: Double, right: Double)] = {
@@ -482,7 +483,7 @@ final class Feeds {
         var out: [ParcelRecord] = []
         var seen = Set<String>()
         for (idx, box) in boxes.enumerated() {
-            let viewbox = String(format: "%.5f,%.5f,%.5f,%.5f", box.left, topLat, box.right, bottomLat)
+            let viewbox = String(format: "%.5f,%.5f,%.5f,%.5f", locale: posix, box.left, topLat, box.right, bottomLat)
             let d = try await fetch(base + "&viewbox=\(viewbox)&bounded=1", cache: "\(cacheKey)-\(box.name)-\(idx)")
             guard let arr = try JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { continue }
             for r in parse(arr) where !seen.contains(r.id) {
