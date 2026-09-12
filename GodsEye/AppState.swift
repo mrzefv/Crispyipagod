@@ -310,7 +310,7 @@ final class AppState: ObservableObject {
         let latSpan = min(0.018, max(0.006, spanDeg))
         let lonScale = min(3.0, max(1.0, 1 / max(0.35, cos(center.latitude * .pi / 180))))
         let lonSpan = latSpan * lonScale
-        return (center.latitude - latSpan, center.latitude + latSpan, center.longitude - lonSpan, center.longitude + lonSpan)
+        return (max(-90, center.latitude - latSpan), min(90, center.latitude + latSpan), center.longitude - lonSpan, center.longitude + lonSpan)
     }
 
     private func residentialBoundsContain(_ outer: (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double),
@@ -589,6 +589,8 @@ final class AppState: ObservableObject {
             residentialBlueprints = fetched
             residentialBlueprintBounds = requestedBounds
         } catch {
+            residentialBlueprints = []
+            residentialBlueprintBounds = nil
             feedErrors += 1
         }
     }
