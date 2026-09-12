@@ -394,7 +394,7 @@ function bindEvents() {
   });
 
   app.querySelector("[data-role='search']")?.addEventListener("input", (event) => {
-    setState(setSearchQuery(state, event.target.value));
+    setState(setSearchQuery(state, event.currentTarget.value));
   });
 
   app.querySelectorAll("[data-action='open-timeline']").forEach((element) => {
@@ -438,7 +438,7 @@ function bindEvents() {
   });
 
   app.querySelector("[data-role='timeline-range']")?.addEventListener("input", (event) => {
-    setState(setSelectedTime(state, Number(event.target.value)));
+    setState(setSelectedTime(state, Number(event.currentTarget.value)));
   });
 
   app.querySelectorAll("select[data-setting]").forEach((element) => {

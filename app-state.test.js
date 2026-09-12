@@ -88,10 +88,13 @@ test("timeline event jumps choose the closest previous and next markers", () => 
 test("switching away from home closes the timeline overlay", () => {
   const timeline = openTimeline(createInitialState());
   const saved = setActiveTab(timeline, "saved");
+  const home = setActiveTab(saved, "home");
   const ignored = setActiveTab(saved, "invalid");
 
   assert.equal(saved.activeTab, "saved");
   assert.equal(saved.screen, "home");
+  assert.equal(home.activeTab, "home");
+  assert.equal(home.screen, "home");
   assert.equal(ignored.activeTab, "saved");
 });
 

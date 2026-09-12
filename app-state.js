@@ -117,7 +117,7 @@ export function setActiveTab(state, activeTab) {
   return {
     ...state,
     activeTab,
-    screen: activeTab === "home" ? state.screen : "home",
+    screen: "home",
   };
 }
 
