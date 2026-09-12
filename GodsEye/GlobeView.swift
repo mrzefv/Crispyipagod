@@ -855,6 +855,7 @@ struct SearchSheet: View {
     @State private var parcels: [ParcelRecord] = []
     @State private var searching = false
     @State private var searchTask: Task<Void, Never>?
+    @State private var activeSearchID: UUID?
 
     private var contactMatches: [Contact] {
         let q = query.trimmingCharacters(in: .whitespaces).uppercased()
@@ -954,23 +955,29 @@ struct SearchSheet: View {
     private func schedule(_ q: String) {
         searchTask?.cancel()
         let trimmed = q.trimmingCharacters(in: .whitespaces)
-        guard trimmed.count >= 2 else { places = []; parcels = []; return }
+        guard trimmed.count >= 2 else { places = []; parcels = []; searching = false; activeSearchID = nil; return }
+        let originCenter = s.center
+        let searchID = UUID()
+        activeSearchID = searchID
         searching = true
         searchTask = Task {
+            defer {
+                if activeSearchID == searchID { searching = false }
+            }
             try? await Task.sleep(nanoseconds: 350_000_000)
             guard !Task.isCancelled else { return }
             let req = MKLocalSearch.Request()
             req.naturalLanguageQuery = trimmed
             req.resultTypes = [.pointOfInterest, .address]
-            req.region = MKCoordinateRegion(center: s.center, span: MKCoordinateSpan(latitudeDelta: 60, longitudeDelta: 60))
+            req.region = MKCoordinateRegion(center: originCenter, span: MKCoordinateSpan(latitudeDelta: 60, longitudeDelta: 60))
             async let placeResp = try? MKLocalSearch(request: req).start()
-            async let parcelResp = try? Feeds.shared.parcelRecords(query: trimmed, near: s.center)
+            async let parcelResp = try? Feeds.shared.parcelRecords(query: trimmed, near: originCenter)
             let resp = await placeResp
             let parcel = await parcelResp
             guard !Task.isCancelled else { return }
+            guard activeSearchID == searchID else { return }
             places = Array((resp?.mapItems ?? []).prefix(12))
             parcels = Array((parcel ?? []).prefix(10))
-            searching = false
         }
     }
 
