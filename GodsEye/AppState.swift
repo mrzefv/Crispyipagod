@@ -62,7 +62,7 @@ final class AppState: ObservableObject {
             if layers.contains(.space) { Task { await refreshSpace() } }
             if layers.contains(.scanner) && scanners.isEmpty { Task { await refreshScanners() } }
             if layers.contains(.peaks) { Task { await refreshPeaks() } }
-            handleResidentialLayerChange()
+            if layers.contains(.residential) != oldValue.contains(.residential) { handleResidentialLayerChange() }
         }
     }
     @Published var contacts: [Contact] = [] { didSet { rebuildDisplay(); trackTick(fromPoll: true) } }
@@ -230,6 +230,8 @@ final class AppState: ObservableObject {
     private var geocoder = CLGeocoder()
     private var geocodeTask: Task<Void, Never>?
     private var pendingDeepLink: URL?
+    private var residentialBlueprintCoverageCenter: CLLocationCoordinate2D?
+    private var residentialBlueprintCoverageMeters: CLLocationDistance = 0
 
     init() {
         let ud = UserDefaults.standard
@@ -269,10 +271,34 @@ final class AppState: ObservableObject {
     private func handleResidentialLayerChange() {
         guard layers.contains(.residential) else {
             residentialBlueprints = []
+            residentialBlueprintCoverageCenter = nil
+            residentialBlueprintCoverageMeters = 0
             return
         }
         guard distance < 8_000 else { return }
         Task { await refreshResidentialBlueprints() }
+    }
+
+    private var residentialBlueprintCoverageActive: Bool {
+        guard layers.contains(.residential), distance < 8_000,
+              let coverageCenter = residentialBlueprintCoverageCenter else { return false }
+        let shift = CLLocation(latitude: center.latitude, longitude: center.longitude)
+            .distance(from: CLLocation(latitude: coverageCenter.latitude, longitude: coverageCenter.longitude))
+        return shift < max(residentialBlueprintCoverageMeters * 0.5, 400)
+    }
+
+    var visibleResidentialBlueprints: [ResidentialBlueprint] {
+        residentialBlueprintCoverageActive ? residentialBlueprints : []
+    }
+
+    var residentialBlueprintStatus: String {
+        if distance >= 8_000 {
+            return residentialBlueprints.isEmpty ? "zoom in (<8 km)" : "\(residentialBlueprints.count) cached · zoom in"
+        }
+        if residentialBlueprintCoverageActive {
+            return residentialBlueprints.isEmpty ? "no footprints in view" : "\(residentialBlueprints.count) footprints"
+        }
+        return "loading current view…"
     }
 
     func neighborCamera(of cam: Camera, forward: Bool) -> Camera? {
@@ -514,6 +540,8 @@ final class AppState: ObservableObject {
                   centerShiftMeters < max(fetchSpanMeters * 0.5, 400),
                   abs(distance - requestedDistance) < max(fetchSpanMeters, 600) else { return }
             residentialBlueprints = fetched
+            residentialBlueprintCoverageCenter = requestedCenter
+            residentialBlueprintCoverageMeters = fetchSpanMeters
         } catch {
             feedErrors += 1
         }

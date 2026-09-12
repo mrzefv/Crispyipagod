@@ -364,7 +364,7 @@ final class Feeds {
         let lonScale = min(3.0, max(1.0, 1 / max(0.35, cos(c.latitude * .pi / 180))))
         let lonSpan = s * lonScale
         let bbox = String(format: "%.4f,%.4f,%.4f,%.4f", locale: posix, c.latitude - s, c.longitude - lonSpan, c.latitude + s, c.longitude + lonSpan)
-        let cacheKey = String(format: "residential-blueprints-%.3f-%.3f-%.3f.json", locale: posix, c.latitude, c.longitude, s)
+        let cacheKey = "residential-blueprints-\(bbox.replacingOccurrences(of: ",", with: "_")).json"
         let q = """
         [out:json][timeout:20];(
           way["building"~"^(house|detached|semidetached_house|terrace|apartments|residential)$"](\(bbox));
