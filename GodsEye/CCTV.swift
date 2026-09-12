@@ -28,6 +28,7 @@ final class CamRecorder {
     private let watchingKey = "cctvWatching"
     private let intervalKey = "cctvIntervalSeconds"
     private var timer: Timer?
+    private var captureTask: Task<Void, Never>?
     private let maxFramesPerCamera = 400
 
     init() {
@@ -37,19 +38,21 @@ final class CamRecorder {
         refreshMetrics()
     }
 
-    deinit { timer?.invalidate() }
+    deinit {
+        timer?.invalidate()
+        captureTask?.cancel()
+    }
 
     func start() {
         timer?.invalidate()
         timer = nil
+        captureTask?.cancel()
         refreshMetrics()
         guard !watching.isEmpty else { return }
         timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(intervalSeconds), repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                await self?.captureWatched()
-            }
+            self?.scheduleCapture()
         }
-        Task { await captureWatched() }
+        scheduleCapture()
     }
 
     func toggleWatch(_ id: String) {
@@ -66,12 +69,25 @@ final class CamRecorder {
         storageBytes = 0
     }
 
+    private func scheduleCapture() {
+        captureTask?.cancel()
+        captureTask = Task { [weak self] in
+            guard let self else { return }
+            await self.captureWatched()
+        }
+    }
+
     private func captureWatched() async {
         for id in watching.sorted() {
+            guard !Task.isCancelled else { return }
             guard let cam = cameraLookup?(id),
                   let url = cacheBustedURL(from: cam.imageURL) else { continue }
             do {
-                let (data, _) = try await URLSession.shared.data(from: url)
+                let (data, response) = try await URLSession.shared.data(from: url)
+                guard let http = response as? HTTPURLResponse,
+                      (200..<300).contains(http.statusCode),
+                      let mime = http.mimeType?.lowercased(),
+                      mime.hasPrefix("image/") else { continue }
                 saveFrame(data, for: id)
             } catch {
                 continue
@@ -186,16 +202,17 @@ struct CameraLiveView: View {
 
     private var controls: some View {
         HStack(spacing: 12) {
-            CircleButton(system: "xmark") { dismiss() }
+            CircleButton(system: "xmark", label: "Close live camera") { dismiss() }
             Spacer()
             if let prev = s.neighborCamera(of: camera, forward: false) {
-                CircleButton(system: "chevron.left") { s.liveCamera = prev }
+                CircleButton(system: "chevron.left", label: "Previous nearby camera") { s.liveCamera = prev }
             }
-            CircleButton(system: rec.watching.contains(camera.id) ? "record.circle.fill" : "record.circle") {
+            CircleButton(system: rec.watching.contains(camera.id) ? "record.circle.fill" : "record.circle",
+                         label: rec.watching.contains(camera.id) ? "Stop watching camera" : "Watch camera") {
                 rec.toggleWatch(camera.id)
             }
             if let next = s.neighborCamera(of: camera, forward: true) {
-                CircleButton(system: "chevron.right") { s.liveCamera = next }
+                CircleButton(system: "chevron.right", label: "Next nearby camera") { s.liveCamera = next }
             }
         }
         .padding(.horizontal, 14)
@@ -212,6 +229,7 @@ struct CameraLiveView: View {
                     switch phase {
                     case .success(let image):
                         image.resizable().scaledToFill()
+                            .accessibilityLabel("Live camera feed for \(camera.name)")
                     case .failure:
                         Label("Camera offline", systemImage: "video.slash")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -271,14 +289,24 @@ struct CameraLiveView: View {
 
     private func startPlayback() {
         stopPlayback()
-        guard let urlString = camera.streamURL ?? camera.videoURL,
-              let url = URL(string: urlString) else { return }
+        if let urlString = camera.streamURL, let url = URL(string: urlString) {
+            startStreamPlayback(url)
+        } else if let urlString = camera.videoURL, let url = URL(string: urlString) {
+            startLoopingClipPlayback(url)
+        }
+    }
+
+    private func startStreamPlayback(_ url: URL) {
         let player = AVPlayer(url: url)
-        if camera.streamURL == nil {
-            loopObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main) { _ in
-                player.seek(to: .zero)
-                player.play()
-            }
+        self.player = player
+        player.play()
+    }
+
+    private func startLoopingClipPlayback(_ url: URL) {
+        let player = AVPlayer(url: url)
+        loopObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main) { _ in
+            player.seek(to: .zero)
+            player.play()
         }
         self.player = player
         player.play()
@@ -296,6 +324,7 @@ struct CameraLiveView: View {
 
 private struct CircleButton: View {
     let system: String
+    let label: String
     let action: () -> Void
 
     var body: some View {
@@ -306,5 +335,6 @@ private struct CircleButton: View {
                 .background(.ultraThinMaterial, in: Circle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 }
