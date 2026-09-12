@@ -627,6 +627,7 @@ struct GlobeView: View {
             GlassButton(icon: s.isLive ? "clock" : "clock.badge.exclamationmark",
                         label: s.isLive ? "Time" : "Replay",
                         active: !s.isLive) { s.openTimeline(at: nil) }
+            GlassButton(icon: "cube.transparent", label: "3D") { s.show3D = true }
             VoiceButton(voice: s.voice)
         }
         .padding(.horizontal, 12)
@@ -1297,7 +1298,6 @@ struct LayersSheet: View {
         case .space: return "Kp \(String(format: "%.1f", s.space.kp)) · \(s.space.stormLevel)"
         case .scanner: return "\(s.scanners.count) feeds"
         case .peaks: return s.peaks.isEmpty ? "zoom in (<300 km)" : "\(s.peaks.count) peaks"
-        case .residential: return "public OSM footprints"
         }
     }
 }

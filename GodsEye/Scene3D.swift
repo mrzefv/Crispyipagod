@@ -36,6 +36,31 @@ enum CesiumConfig {
     static let defaultIonToken = ""
     static let googleTilesAsset = 2275207      // Google Photorealistic 3D Tiles via ion
     static let osmBuildingsAsset = 96188       // Cesium OSM Buildings
+    /// Fallback Google Map Tiles API key (Photorealistic 3D without ion). Settings → 3D Scene overrides.
+    static let defaultGoogleKey = ""
+}
+
+enum SceneTool: String, CaseIterable, Identifiable {
+    case none, measure, los, probe, scan
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .none: return "Inspect"
+        case .measure: return "Measure"
+        case .los: return "Line of sight"
+        case .probe: return "Height probe"
+        case .scan: return "Scan radius"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .none: return "hand.tap"
+        case .measure: return "ruler"
+        case .los: return "eye"
+        case .probe: return "arrow.up.and.down"
+        case .scan: return "dot.radiowaves.left.and.right"
+        }
+    }
 }
 
 // MARK: - Hand-rolled tiles catalog (godseye-tiles)
@@ -70,6 +95,9 @@ struct Scene3DView: View {
     @State private var cockpit = false
     @State private var dense = false
     @State private var chromeHidden = false
+    @State private var tool: SceneTool = .none
+    @State private var shadows = false
+    @State private var shadowHour: Double = 14
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -107,7 +135,10 @@ struct Scene3DView: View {
                     HStack(spacing: 6) {
                         ForEach(Basemap.allCases) { b in
                             pill(b.title, icon: b.icon, active: s.basemap == b && customRaster == nil, tint: .accentColor) {
-                                if b.needsIon && s.ionToken.isEmpty && CesiumConfig.defaultIonToken.isEmpty { status = "\(b.title) needs a Cesium ion token (Settings → 3D Scene)"; return }
+                                let hasIon = !s.ionToken.isEmpty || !CesiumConfig.defaultIonToken.isEmpty
+                                let hasGoogle = !s.googleMapsKey.isEmpty || !CesiumConfig.defaultGoogleKey.isEmpty
+                                if b == .google3D && !hasIon && !hasGoogle { status = "Google 3D needs a Cesium ion token or Google Map Tiles key (Settings → 3D Scene)"; return }
+                                if b.needsIon && b != .google3D && !hasIon { status = "\(b.title) needs a Cesium ion token (Settings → 3D Scene)"; return }
                                 s.basemap = b; customRaster = nil
                                 bridge.eval("GE.setBasemap('\(b.rawValue)')")
                             }
@@ -145,6 +176,27 @@ struct Scene3DView: View {
                 }
             }
             .padding(.horizontal, 12).padding(.top, 6)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(SceneTool.allCases) { tl in
+                        pill(tl.title, icon: tl.icon, active: tool == tl, tint: .yellow) {
+                            tool = tl
+                            bridge.eval("GE.setTool('\(tl.rawValue)')")
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        }
+                    }
+                    pill(shadows ? "Shadows \(Int(shadowHour)):00Z" : "Shadows", icon: "sun.max", active: shadows, tint: .orange) {
+                        shadows.toggle()
+                        bridge.eval("GE.setShadows(\(shadows), \(shadowHour))")
+                    }
+                    if shadows {
+                        Slider(value: Binding(get: { shadowHour }, set: { shadowHour = $0; bridge.eval("GE.setShadows(true, \(shadowHour))") }), in: 0...23, step: 1)
+                            .frame(width: 120).tint(.orange)
+                    }
+                    pill("Clear", icon: "xmark.circle", active: false, tint: .gray) { bridge.eval("GE.clearTools()") }
+                }
+                .padding(.horizontal, 12)
+            }
             HStack {
                 Text(status).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
                 Spacer()
@@ -180,7 +232,8 @@ struct Scene3DView: View {
             ready = true
             status = "\(s.basemap.title) · tap to inspect"
             let assets = s.ionAssets.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
-            bridge.eval("GE.init({basemap:'\(s.basemap.rawValue)', terrain:\(s.sceneTerrain), buildings:\(s.sceneBuildings), assets:\(assets), sensor:'\(s.sensor.rawValue)', hud:\(s.hud), accent:'\(s.accentHex)'})")
+            let gkey = (s.googleMapsKey.isEmpty ? CesiumConfig.defaultGoogleKey : s.googleMapsKey).replacingOccurrences(of: "'", with: "")
+            bridge.eval("GE.init({basemap:'\(s.basemap.rawValue)', terrain:\(s.sceneTerrain), buildings:\(s.sceneBuildings), assets:\(assets), sensor:'\(s.sensor.rawValue)', hud:\(s.hud), accent:'\(s.accentHex)', googleKey:'\(gkey)'})")
             let h = max(s.distance, 300)
             bridge.eval(String(format: "GE.setView(%.6f,%.6f,%.1f,%.2f,%.2f)", s.center.latitude, s.center.longitude, h, s.heading, s.pitch))
             pushEntities()
@@ -191,12 +244,21 @@ struct Scene3DView: View {
             let d = (msg["height"] as? Double) ?? 3000
             UIImpactFeedbackGenerator(style: .light).impactOccurred()
             let c = CLLocationCoordinate2D(latitude: lat, longitude: lon)
+            let surf = msg["surface"] as? Double
+            let terr = msg["terrain"] as? Double
             Task {
                 let r = await s.reverseGeocode(c)
-                let e = Entity.place(lat: lat, lon: lon, name: r.title, detail: r.detail, distance: min(max(d * 0.35, 3_000), 600_000), extraMeta: r.extraMeta)
+                var meta = r.extraMeta
+                if let surf { meta.append(MetaRow("Surface elevation", String(format: "%.1f m · %.0f ft (3D tiles)", surf, surf * 3.281))) }
+                if let surf, let terr, surf - terr > 2 { meta.append(MetaRow("Structure height (est.)", String(format: "%.1f m · %.0f ft", surf - terr, (surf - terr) * 3.281))) }
+                if let m = msg["mgrs"] as? String { meta.append(MetaRow("MGRS", m)) }
+                let e = Entity.place(lat: lat, lon: lon, name: r.title, detail: r.detail, distance: min(max(d * 0.35, 3_000), 600_000), extraMeta: meta)
                 selected = e
                 s.lookupIntel(for: e)
             }
+        case "tool":
+            if let text = msg["text"] as? String { status = text; s.show(text) }
+            UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
         case "camera":
             if let lat = msg["lat"] as? Double, let lon = msg["lon"] as? Double, let h = msg["height"] as? Double {
                 lastCam = (lat, lon, h, (msg["heading"] as? Double) ?? 0, (msg["pitch"] as? Double) ?? 0)
@@ -217,6 +279,13 @@ struct Scene3DView: View {
         if let c = (s.contacts + s.militaryContacts).first(where: { "ac-\($0.id)" == id }) { selected = Entity.from(c) }
         else if let v = s.ships.values.first(where: { "sh-\($0.id)" == id }) { selected = Entity.from(v) }
         else if let cam = s.cameras.first(where: { "cam-\($0.id)" == id }) { selected = Entity.from(cam) }
+        else if let q = s.visibleQuakes.first(where: { "eq-\($0.id)" == id }) { selected = Entity.from(q) }
+        else if let f = s.visibleFires.first(where: { "fire-\($0.id)" == id }) { selected = Entity.from(f) }
+        else if let sat = s.visibleSatellites.first(where: { "sat-\($0.id)" == id }) { selected = Entity.from(sat) }
+        else if let tr = s.visibleTrains.first(where: { "train-\($0.id)" == id }) { selected = Entity.from(tr) }
+        else if let ap = s.visibleAirports.first(where: { "apt-\($0.id)" == id }) { selected = Entity.from(ap) }
+        else if let n = s.infra.first(where: { "infra-\($0.id)" == id }) { selected = Entity.from(n) }
+        else if let st = s.storms.first(where: { "storm-\($0.id)" == id }) { selected = Entity.from(st) }
     }
 
     private func trackEntity(_ id: String) {
@@ -238,6 +307,29 @@ struct Scene3DView: View {
             for v in shs.prefix(dense ? 3000 : 400) {
                 items.append(["id": "sh-\(v.id)", "kind": "sh", "lat": v.lat, "lon": v.lon, "alt": 0, "label": v.displayName, "heading": v.cog, "mil": false, "spd": v.sogKt, "sub": "MMSI \(v.id)"])
             }
+            for q in s.visibleQuakes.prefix(400) {
+                items.append(["id": "eq-\(q.id)", "kind": "eq", "lat": q.lat, "lon": q.lon, "alt": 0, "label": String(format: "M%.1f", q.mag), "heading": 0, "mil": false,
+                              "sub": "\(Int(q.depthKm)) km · \(q.place)", "r": pow(10, 0.5 * q.mag) * 120])
+            }
+            for f in s.visibleFires.prefix(600) {
+                items.append(["id": "fire-\(f.id)", "kind": "fire", "lat": f.lat, "lon": f.lon, "alt": 0, "label": "FIRE \(Int(f.frp)) MW", "heading": 0, "mil": false, "sub": f.confidence])
+            }
+            for sat in s.visibleSatellites.prefix(300) {
+                items.append(["id": "sat-\(sat.id)", "kind": "sat", "lat": sat.lat, "lon": sat.lon, "alt": sat.altKm * 1000, "label": sat.name, "heading": 0, "mil": false,
+                              "sub": "\(sat.cls.label) · \(Int(sat.altKm)) km", "cls": sat.cls.rawValue])
+            }
+            for tr in s.visibleTrains.prefix(300) {
+                items.append(["id": "train-\(tr.id)", "kind": "train", "lat": tr.lat, "lon": tr.lon, "alt": 0, "label": tr.name, "heading": 0, "mil": false, "sub": "\(tr.operatorName) · \(Int(tr.speedKmh)) km/h"])
+            }
+            for ap in s.visibleAirports.prefix(200) {
+                items.append(["id": "apt-\(ap.id)", "kind": "apt", "lat": ap.lat, "lon": ap.lon, "alt": 0, "label": ap.iata.isEmpty ? ap.id : ap.iata, "heading": 0, "mil": false, "sub": ap.name])
+            }
+            for n in s.infra.prefix(300) {
+                items.append(["id": "infra-\(n.id)", "kind": "infra", "lat": n.lat, "lon": n.lon, "alt": 0, "label": n.name, "heading": 0, "mil": false, "sub": n.kind.label])
+            }
+            for st in s.storms.prefix(100) {
+                items.append(["id": "storm-\(st.id)", "kind": "storm", "lat": st.lat, "lon": st.lon, "alt": 0, "label": "STORM", "heading": st.headingDeg, "mil": false, "sub": "\(Int(st.speedKmh)) km/h · \(Int(st.intensity)) dBZ"])
+            }
             for cam in s.visibleCameras.prefix(300) {
                 items.append(["id": "cam-\(cam.id)", "kind": "cam", "lat": cam.lat, "lon": cam.lon, "alt": 0, "label": cam.name, "heading": cam.heading ?? -1, "mil": false,
                               "img": cam.imageURL, "sub": "\(cam.source)\(cam.isLiveVideo ? " · LIVE" : "")", "watch": s.cctv.watching.contains(cam.id)])
@@ -248,6 +340,11 @@ struct Scene3DView: View {
             for p in s.propertyLines {
                 for ring in p.rings {
                     polys.append(["id": p.id, "kind": p.kind == .building ? "fp" : "parcel", "target": p.isTarget, "coords": ring.flatMap { [$0.longitude, $0.latitude] }])
+                }
+            }
+            for h in s.visibleHazards.prefix(60) {
+                for (i, ring) in h.rings.enumerated() {
+                    polys.append(["id": "haz-\(h.id)-\(i)", "kind": "hazard", "target": false, "coords": ring.flatMap { [$0.longitude, $0.latitude] }, "label": h.event])
                 }
             }
             for r in s.regions {
@@ -583,7 +680,8 @@ window.GE = (() => {
         case 'google3D':
           L.addImageryProvider(esri('World_Imagery'));
           status('REFRESHING GOOGLE PHOTOREALISTIC 3D TILES');
-          tileset = await Cesium.Cesium3DTileset.fromIonAssetId(\#(google), { showCreditsOnScreen: true, maximumScreenSpaceError: 6 });
+          if (cfg.googleKey) tileset = await Cesium.createGooglePhotorealistic3DTileset({ key: cfg.googleKey, onlyUsingWithGoogleGeocoder: false, showCreditsOnScreen: true, maximumScreenSpaceError: 6 });
+          else tileset = await Cesium.Cesium3DTileset.fromIonAssetId(\#(google), { showCreditsOnScreen: true, maximumScreenSpaceError: 6 });
           viewer.scene.primitives.add(tileset); viewer.scene.globe.show = false; break;
       }
       $('src').textContent = rasterCredit[name] || name.toUpperCase();
@@ -675,7 +773,10 @@ window.GE = (() => {
       if (!cart) cart = viewer.camera.pickEllipsoid(click.position, viewer.scene.globe.ellipsoid);
       if (!cart) return;
       const cg = Cesium.Cartographic.fromCartesian(cart);
-      post({type:'tap', lat: Cesium.Math.toDegrees(cg.latitude), lon: Cesium.Math.toDegrees(cg.longitude), height: viewer.camera.positionCartographic.height});
+      const lat = Cesium.Math.toDegrees(cg.latitude), lon = Cesium.Math.toDegrees(cg.longitude);
+      if (tool !== 'none') { toolTap(cart, cg, lat, lon); return; }
+      const terr = viewer.scene.globe.getHeight(cg);
+      post({type:'tap', lat, lon, height: viewer.camera.positionCartographic.height, surface: cg.height, terrain: (terr === undefined ? null : terr), mgrs: toMGRS(lat, lon, 5)});
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
     h.setInputAction((e) => {
       const picked = viewer.scene.pick(e.position);
@@ -726,6 +827,91 @@ window.GE = (() => {
   function home(){ if (!viewer) return; const c = viewer.camera.positionCartographic; viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromRadians(c.longitude, c.latitude, c.height), orientation:{heading:0, pitch:-Cesium.Math.PI_OVER_TWO, roll:0}, duration:0.8 }); }
   function tilt(){ if (!viewer) return; const c = viewer.camera.positionCartographic; viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromRadians(c.longitude, c.latitude, Math.max(c.height, 400)), orientation:{heading:viewer.camera.heading, pitch:Cesium.Math.toRadians(-30), roll:0}, duration:0.8 }); }
 
+  // ---- spatial tools (work on 3D tiles via pickPosition / clampToHeight) ----
+  let tool = 'none', toolPts = [];
+  const toolEnts = [];
+  function setTool(name){ tool = name || 'none'; toolPts = []; $('cross').style.borderColor = ''; status(tool === 'none' ? 'INSPECT · TAP TO IDENTIFY' : tool.toUpperCase() + (tool === 'measure' || tool === 'los' ? ' · TAP TWO POINTS' : ' · TAP A POINT')); }
+  function clearTools(){ for (const e of toolEnts) viewer.entities.remove(e); toolEnts.length = 0; toolPts = []; viewer.scene.requestRender(); }
+  function addTool(o){ const e = viewer.entities.add(o); toolEnts.push(e); return e; }
+  function fmtM(m){ return m < 1000 ? m.toFixed(1) + ' M' : (m/1000).toFixed(2) + ' KM'; }
+  function marker(cart, text, color){ addTool({ position: cart, point: { pixelSize: 8, color: Cesium.Color.fromCssColorString(color), outlineColor: Cesium.Color.BLACK, outlineWidth: 2, disableDepthTestDistance: Number.POSITIVE_INFINITY }, billboard: text ? { image: sprite(text, null, color, {}), verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0,-8), scale: .5, disableDepthTestDistance: Number.POSITIVE_INFINITY } : undefined }); }
+  async function toolTap(cart, cg, lat, lon){
+    if (tool === 'probe') {
+      const terr = viewer.scene.globe.getHeight(cg) || 0;
+      const h = cg.height, sh = Math.max(0, h - terr);
+      marker(cart, 'SURF ' + h.toFixed(1) + ' M · STRUCT ' + sh.toFixed(1) + ' M', '#ffe45c');
+      // vertical drop line to terrain
+      addTool({ polyline: { positions: [cart, Cesium.Cartesian3.fromDegrees(lon, lat, terr)], width: 2, material: Cesium.Color.YELLOW.withAlpha(.8) } });
+      post({type:'tool', text: 'PROBE ' + toMGRS(lat, lon, 5) + ' · SURFACE ' + h.toFixed(1) + ' M · STRUCTURE ' + sh.toFixed(1) + ' M (' + (sh*3.281).toFixed(0) + ' FT)'});
+      viewer.scene.requestRender(); return;
+    }
+    if (tool === 'scan') {
+      const r = Math.max(150, Math.min(5000, viewer.camera.positionCartographic.height * 0.35));
+      addTool({ position: cart, ellipse: { semiMajorAxis: r, semiMinorAxis: r, material: Cesium.Color.YELLOW.withAlpha(.08), outline: true, outlineColor: Cesium.Color.YELLOW, outlineWidth: 2, classificationType: Cesium.ClassificationType.BOTH } });
+      const hits = [];
+      for (const e of (lastData && lastData.entities) || []) {
+        const d = Cesium.Cartesian3.distance(cart, Cesium.Cartesian3.fromDegrees(e.lon, e.lat, e.alt||0));
+        if (d <= r) hits.push({ e, d });
+      }
+      hits.sort((a,b) => a.d - b.d);
+      for (const h of hits.slice(0, 12)) addTool({ polyline: { positions: [cart, Cesium.Cartesian3.fromDegrees(h.e.lon, h.e.lat, h.e.alt||0)], width: 1, material: Cesium.Color.YELLOW.withAlpha(.35) } });
+      const by = {}; for (const h of hits) by[h.e.kind] = (by[h.e.kind]||0) + 1;
+      marker(cart, 'SCAN ' + Math.round(r) + ' M · ' + hits.length + ' CONTACTS', '#ffe45c');
+      post({type:'tool', text: 'SCAN ' + Math.round(r) + ' M: ' + hits.length + ' contacts · ' + Object.entries(by).map(([k,v]) => k.toUpperCase() + ' ' + v).join(' · ') + (hits[0] ? ' · nearest ' + hits[0].e.label + ' ' + Math.round(hits[0].d) + ' m' : '')});
+      viewer.scene.requestRender(); return;
+    }
+    toolPts.push({ cart, cg, lat, lon });
+    marker(cart, toolPts.length === 1 ? 'A' : 'B', tool === 'los' ? '#4de3ff' : '#ffe45c');
+    if (toolPts.length < 2) { viewer.scene.requestRender(); return; }
+    const [A, B] = toolPts; toolPts = [];
+    const dist = Cesium.Cartesian3.distance(A.cart, B.cart);
+    const geo = new Cesium.EllipsoidGeodesic(A.cg, B.cg); const ground = geo.surfaceDistance;
+    const brg = bearing(A.lat, A.lon, B.lat, B.lon); const dh = B.cg.height - A.cg.height;
+    if (tool === 'measure') {
+      addTool({ polyline: { positions: [A.cart, B.cart], width: 3, material: new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.YELLOW }) } });
+      const mid = Cesium.Cartesian3.midpoint(A.cart, B.cart, new Cesium.Cartesian3());
+      marker(mid, fmtM(dist) + ' · ' + String(Math.round(brg)).padStart(3,'0') + '° · ΔH ' + dh.toFixed(1) + ' M', '#ffe45c');
+      post({type:'tool', text: 'MEASURE ' + fmtM(dist) + ' slant · ' + fmtM(ground) + ' ground · ' + String(Math.round(brg)).padStart(3,'0') + '° · ΔH ' + dh.toFixed(1) + ' m'});
+    } else if (tool === 'los') {
+      // sample the straight line (eye height +1.7 m at both ends) against the 3D tiles / terrain
+      const N = Math.max(24, Math.min(160, Math.round(dist / 5)));
+      const samples = [], line = [];
+      for (let i = 0; i <= N; i++) {
+        const f = i / N; const pt = geo.interpolateUsingFraction(f);
+        const hLine = A.cg.height + 1.7 + (B.cg.height + 1.7 - (A.cg.height + 1.7)) * f;
+        samples.push(new Cesium.Cartographic(pt.longitude, pt.latitude, 0)); line.push(hLine);
+      }
+      let clamped;
+      try { clamped = await viewer.scene.sampleHeightMostDetailed(samples); } catch(e) { clamped = samples.map(s => { s.height = viewer.scene.globe.getHeight(s) || 0; return s; }); }
+      let blocked = 0, firstBlock = -1;
+      const segsOK = [], segsBad = [];
+      for (let i = 0; i <= N; i++) {
+        const surf = (clamped[i] && clamped[i].height !== undefined) ? clamped[i].height : (viewer.scene.globe.getHeight(samples[i]) || 0);
+        const p = Cesium.Cartesian3.fromRadians(samples[i].longitude, samples[i].latitude, line[i]);
+        const bad = i > 0 && i < N && surf > line[i] + 0.3;
+        if (bad) { blocked++; if (firstBlock < 0) firstBlock = i; }
+        (bad ? segsBad : segsOK).push(p);
+      }
+      if (segsOK.length > 1) addTool({ polyline: { positions: segsOK, width: 3, material: Cesium.Color.fromCssColorString('#59ff73').withAlpha(.9) } });
+      if (segsBad.length > 1) addTool({ polyline: { positions: segsBad, width: 4, material: Cesium.Color.RED.withAlpha(.9) } });
+      const pct = Math.round(100 * blocked / Math.max(1, N - 1));
+      const mid = Cesium.Cartesian3.midpoint(A.cart, B.cart, new Cesium.Cartesian3());
+      marker(mid, (blocked ? 'LOS BLOCKED ' + pct + '%' : 'LOS CLEAR') + ' · ' + fmtM(dist), blocked ? '#ff3b30' : '#59ff73');
+      post({type:'tool', text: (blocked ? 'LINE OF SIGHT BLOCKED (' + pct + '% obstructed, first at ' + Math.round(firstBlock / N * dist) + ' m)' : 'LINE OF SIGHT CLEAR') + ' · ' + fmtM(dist) + ' · ' + String(Math.round(brg)).padStart(3,'0') + '°'});
+    }
+    viewer.scene.requestRender();
+  }
+  function setShadows(on, hourZ){
+    if (!viewer) return;
+    viewer.shadows = !!on; viewer.terrainShadows = on ? Cesium.ShadowMode.ENABLED : Cesium.ShadowMode.DISABLED;
+    viewer.scene.globe.enableLighting = !!on;
+    if (tileset) tileset.shadows = on ? Cesium.ShadowMode.ENABLED : Cesium.ShadowMode.DISABLED;
+    for (const t of customTs.values()) t.shadows = on ? Cesium.ShadowMode.ENABLED : Cesium.ShadowMode.DISABLED;
+    if (on) { const d = new Date(); d.setUTCHours(Math.floor(hourZ||12), Math.round(((hourZ||12)%1)*60), 0, 0); viewer.clock.currentTime = Cesium.JulianDate.fromDate(d); viewer.clock.shouldAnimate = false; }
+    viewer.scene.requestRenderMode = !on && !(SHADERS[sensor] && sensor !== 'flir');
+    viewer.scene.requestRender();
+  }
+
   // ---- cockpit ----
   function setCockpit(on){
     cockpit = !!on && !!(lastData && lastData.track && lastData.track.id);
@@ -750,7 +936,8 @@ window.GE = (() => {
   }
 
   // ---- data ----
-  const colors = { ac:'#4de3ff', mil:'#ffa63d', sh:'#5aa9ff', cam:'#c77dff' };
+  const colors = { ac:'#4de3ff', mil:'#ffa63d', sh:'#5aa9ff', cam:'#c77dff', eq:'#ff6a3d', fire:'#ff3b30', sat:'#9ad7ff', train:'#ffd166', apt:'#8ecae6', infra:'#2ec4b6', storm:'#c77dff' };
+  const icons = { ac:'✈', sh:'⛴', cam:'▣', eq:'◎', fire:'▲', sat:'✦', train:'▬', apt:'⊕', infra:'▦', storm:'≋' };
   function setData(d){
     if (!viewer) return;
     lastData = d;
@@ -764,7 +951,7 @@ window.GE = (() => {
       const cc = Cesium.Color.fromCssColorString(col);
       let ent = viewer.entities.getById(id);
       const isCam = e.kind === 'cam';
-      const img = boxed ? (isCam && camH < 8000 ? (camImgs.get(e.id) || sprite(e.label, e.sub, col, { icon: '▣' })) : sprite(e.label, e.sub, col, { icon: e.kind==='ac' ? '✈' : e.kind==='sh' ? '⛴' : '▣' })) : null;
+      const img = boxed ? (isCam && camH < 8000 ? (camImgs.get(e.id) || sprite(e.label, e.sub, col, { icon: '▣' })) : sprite(e.label, e.sub, col, { icon: icons[e.kind] || '▣' })) : null;
       if (isCam && camH < 8000 && !camImgs.has(e.id)) { camImgs.set(e.id, null); camCard(e.img, e.label).then(cv => { camImgs.set(e.id, cv); const en = viewer.entities.getById(id); if (en && en.billboard) { en.billboard.image = cv; viewer.scene.requestRender(); } }); }
       if (!ent) {
         ent = viewer.entities.add({ id, position: pos,
@@ -772,14 +959,16 @@ window.GE = (() => {
           billboard: { image: img || sprite(e.label, e.sub, col), verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0,-6), scale: 0.5, heightReference: e.kind==='ac'?Cesium.HeightReference.NONE:Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY, show: boxed, scaleByDistance: new Cesium.NearFarScalar(500,1.0,200000,0.45) } });
       } else { ent.position = pos; if (boxed && img) ent.billboard.image = img; ent.point.show = !boxed; ent.billboard.show = boxed; }
       if (e.watch && ent.billboard) ent.billboard.color = Cesium.Color.fromCssColorString('#ffb0b0');
+      if (e.kind === 'eq' && e.r) { const rid = 'r:' + e.id; keep.add(rid); if (!viewer.entities.getById(rid)) viewer.entities.add({ id: rid, position: Cesium.Cartesian3.fromDegrees(e.lon, e.lat, 0), ellipse: { semiMajorAxis: e.r, semiMinorAxis: e.r, material: cc.withAlpha(.12), outline: true, outlineColor: cc.withAlpha(.7), classificationType: Cesium.ClassificationType.BOTH } }); }
+      if (e.kind === 'storm' && e.heading >= 0) { const vid = 'v:' + e.id; keep.add(vid); const end = Cesium.Cartesian3.fromDegrees(e.lon + Math.sin(e.heading*Math.PI/180)*.05, e.lat + Math.cos(e.heading*Math.PI/180)*.05, 0); const ve = viewer.entities.getById(vid); if (!ve) viewer.entities.add({ id: vid, polyline: { positions: [pos, end], width: 2, material: new Cesium.PolylineDashMaterialProperty({ color: cc }), clampToGround: true } }); else ve.polyline.positions = [pos, end]; }
     }
     for (const p of (d.polys||[])) {
       const id = 'p:' + p.id + ':' + p.coords.length; keep.add(id);
       if (viewer.entities.getById(id)) continue;
       const arr = Cesium.Cartesian3.fromDegreesArray(p.coords);
-      const col = p.kind === 'fp' ? Cesium.Color.CYAN : p.kind === 'region' ? Cesium.Color.WHITE : Cesium.Color.YELLOW;
+      const col = p.kind === 'fp' ? Cesium.Color.CYAN : p.kind === 'region' ? Cesium.Color.WHITE : p.kind === 'hazard' ? Cesium.Color.fromCssColorString('#ff6a3d') : Cesium.Color.YELLOW;
       viewer.entities.add({ id,
-        polygon: p.kind === 'region' ? undefined : { hierarchy: new Cesium.PolygonHierarchy(arr), material: col.withAlpha(p.kind==='fp' ? 0.10 : (p.target ? 0.18 : 0.04)), classificationType: Cesium.ClassificationType.BOTH },
+        polygon: p.kind === 'region' ? undefined : { hierarchy: new Cesium.PolygonHierarchy(arr), material: col.withAlpha(p.kind==='fp' ? 0.10 : p.kind==='hazard' ? 0.15 : (p.target ? 0.18 : 0.04)), classificationType: Cesium.ClassificationType.BOTH },
         polyline: { positions: arr.concat([arr[0]]), width: p.kind==='fp' ? 1.5 : (p.target ? 3 : (p.kind==='region' ? 2 : 1)), material: col.withAlpha(p.kind==='region' ? 0.9 : (p.target ? 1 : 0.6)), clampToGround: true } });
     }
     if (d.selected && d.selected.lat !== undefined) {
@@ -810,7 +999,7 @@ window.GE = (() => {
     viewer.scene.requestRender();
   }
 
-  return { init, setBasemap, setTerrain, setBuildings, loadAssets, setView, setData, home, tilt, setCustomRaster, setCustomTilesets, setSensor, setHUD, setCockpit };
+  return { init, setBasemap, setTerrain, setBuildings, loadAssets, setView, setData, home, tilt, setCustomRaster, setCustomTilesets, setSensor, setHUD, setCockpit, setTool, clearTools, setShadows };
 })();
 window.addEventListener('load', () => post({type:'ready'}));
 window.addEventListener('error', (e) => post({type:'status', text: 'JS: ' + e.message}));

@@ -110,6 +110,7 @@ struct SettingsView: View {
 
                 Section {
                     Picker("Default basemap", selection: $s.basemap) { ForEach(Basemap.allCases) { Text($0.title).tag($0) } }
+                    SecureField("Google Map Tiles API key (Photorealistic 3D without ion)", text: $s.googleMapsKey).font(.system(.body, design: .monospaced)).textInputAutocapitalization(.never).autocorrectionDisabled()
                     SecureField("Cesium ion access token", text: $s.ionToken).font(.system(.body, design: .monospaced)).textInputAutocapitalization(.never).autocorrectionDisabled()
                     TextField("Extra ion asset IDs (comma-separated)", text: $s.ionAssets).font(.system(.body, design: .monospaced)).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.numbersAndPunctuation)
                     Toggle("World Terrain", isOn: $s.sceneTerrain)

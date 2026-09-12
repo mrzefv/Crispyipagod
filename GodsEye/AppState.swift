@@ -215,6 +215,7 @@ final class AppState: ObservableObject {
     @Published var show3D = false
     @Published var ionToken: String { didSet { ud.set(ionToken, forKey: "ionToken") } }
     @Published var ionAssets: String { didSet { ud.set(ionAssets, forKey: "ionAssets") } }
+    @Published var googleMapsKey: String { didSet { ud.set(googleMapsKey, forKey: "googleMapsKey") } }
     @Published var basemap: Basemap { didSet { ud.set(basemap.rawValue, forKey: "basemap") } }
     @Published var sceneTerrain: Bool { didSet { ud.set(sceneTerrain, forKey: "sceneTerrain") } }
     @Published var sceneBuildings: Bool { didSet { ud.set(sceneBuildings, forKey: "sceneBuildings") } }
@@ -261,7 +262,8 @@ final class AppState: ObservableObject {
         firmsKey = ud.string(forKey: "firmsKey") ?? ""
         ionToken = ud.string(forKey: "ionToken") ?? ""
         ionAssets = ud.string(forKey: "ionAssets") ?? ""
-        basemap = Basemap(rawValue: ud.string(forKey: "basemap") ?? "") ?? .esriImagery
+        googleMapsKey = ud.string(forKey: "googleMapsKey") ?? ""
+        basemap = Basemap(rawValue: ud.string(forKey: "basemap") ?? "") ?? ((ud.string(forKey: "ionToken") ?? "").isEmpty && (ud.string(forKey: "googleMapsKey") ?? "").isEmpty && CesiumConfig.defaultIonToken.isEmpty && CesiumConfig.defaultGoogleKey.isEmpty ? .esriImagery : .google3D)
         sceneTerrain = ud.object(forKey: "sceneTerrain") as? Bool ?? true
         sceneBuildings = ud.object(forKey: "sceneBuildings") as? Bool ?? false
         sceneEntities = ud.object(forKey: "sceneEntities") as? Bool ?? true
