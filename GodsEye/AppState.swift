@@ -230,8 +230,7 @@ final class AppState: ObservableObject {
     private var geocoder = CLGeocoder()
     private var geocodeTask: Task<Void, Never>?
     private var pendingDeepLink: URL?
-    private var residentialBlueprintCoverageCenter: CLLocationCoordinate2D?
-    private var residentialBlueprintCoverageMeters: CLLocationDistance = 0
+    private var residentialBlueprintBounds: (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)?
 
     init() {
         let ud = UserDefaults.standard
@@ -271,8 +270,7 @@ final class AppState: ObservableObject {
     private func handleResidentialLayerChange() {
         guard layers.contains(.residential) else {
             residentialBlueprints = []
-            residentialBlueprintCoverageCenter = nil
-            residentialBlueprintCoverageMeters = 0
+            residentialBlueprintBounds = nil
             return
         }
         guard distance < 8_000 else { return }
@@ -280,11 +278,10 @@ final class AppState: ObservableObject {
     }
 
     private var residentialBlueprintCoverageActive: Bool {
-        guard layers.contains(.residential), distance < 8_000,
-              let coverageCenter = residentialBlueprintCoverageCenter else { return false }
-        let shift = CLLocation(latitude: center.latitude, longitude: center.longitude)
-            .distance(from: CLLocation(latitude: coverageCenter.latitude, longitude: coverageCenter.longitude))
-        return shift < max(residentialBlueprintCoverageMeters * 0.5, 400)
+        guard layers.contains(.residential),
+              let fetchedBounds = residentialBlueprintBounds,
+              let currentBounds = residentialViewportBounds(center: center, distance: distance) else { return false }
+        return residentialBoundsContain(fetchedBounds, currentBounds)
     }
 
     var visibleResidentialBlueprints: [ResidentialBlueprint] {
@@ -299,6 +296,19 @@ final class AppState: ObservableObject {
             return residentialBlueprints.isEmpty ? "no footprints in view" : "\(residentialBlueprints.count) footprints"
         }
         return "loading current view…"
+    }
+
+    private func residentialViewportBounds(center: CLLocationCoordinate2D, distance: Double) -> (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)? {
+        guard distance < 8_000 else { return nil }
+        let latSpan = min(0.018, max(0.006, distance / 550_000))
+        let lonScale = min(3.0, max(1.0, 1 / max(0.35, cos(center.latitude * .pi / 180))))
+        let lonSpan = latSpan * lonScale
+        return (center.latitude - latSpan, center.latitude + latSpan, center.longitude - lonSpan, center.longitude + lonSpan)
+    }
+
+    private func residentialBoundsContain(_ outer: (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double),
+                                          _ inner: (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)) -> Bool {
+        inner.minLat >= outer.minLat && inner.maxLat <= outer.maxLat && inner.minLon >= outer.minLon && inner.maxLon <= outer.maxLon
     }
 
     func neighborCamera(of cam: Camera, forward: Bool) -> Camera? {
@@ -529,19 +539,15 @@ final class AppState: ObservableObject {
         guard distance < 8_000 else { return }
         let requestedCenter = center
         let requestedDistance = distance
+        guard let requestedBounds = residentialViewportBounds(center: requestedCenter, distance: requestedDistance) else { return }
         let span = min(0.018, max(0.006, requestedDistance / 550_000))
         do {
             let fetched = try await Feeds.shared.residentialBlueprints(center: requestedCenter, spanDeg: span)
-            let fetchSpanMeters = span * 111_000
-            let centerShiftMeters = CLLocation(latitude: center.latitude, longitude: center.longitude)
-                .distance(from: CLLocation(latitude: requestedCenter.latitude, longitude: requestedCenter.longitude))
             guard layers.contains(.residential),
-                  distance < 8_000,
-                  centerShiftMeters < max(fetchSpanMeters * 0.5, 400),
-                  abs(distance - requestedDistance) < max(fetchSpanMeters, 600) else { return }
+                  let currentBounds = residentialViewportBounds(center: center, distance: distance),
+                  residentialBoundsContain(requestedBounds, currentBounds) else { return }
             residentialBlueprints = fetched
-            residentialBlueprintCoverageCenter = requestedCenter
-            residentialBlueprintCoverageMeters = fetchSpanMeters
+            residentialBlueprintBounds = requestedBounds
         } catch {
             feedErrors += 1
         }
