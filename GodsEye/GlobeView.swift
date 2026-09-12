@@ -933,7 +933,7 @@ struct SearchSheet: View {
                 Section(searching ? "Searching…" : "Places") {
                     ForEach(places, id: \.self) { item in
                         Button { pickPlace(item) } label: {
-                            row(icon: "mappin.and.ellipse", color: .white,
+                            row(icon: "building.2", color: .white,
                                 title: item.name ?? "Unnamed",
                                 sub: item.placemark.title ?? Fmt.coord(item.placemark.coordinate.latitude, item.placemark.coordinate.longitude))
                         }
@@ -1069,11 +1069,34 @@ struct SearchSheet: View {
         let c = item.placemark.coordinate
         let name = item.name ?? "Location"
         let detail = item.placemark.title ?? ""
+        let extraMeta = placeMetadata(from: item.placemark)
         dismiss()
         Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
-            s.select(Entity.place(lat: c.latitude, lon: c.longitude, name: name, detail: detail, distance: item.pointOfInterestCategory == .airport ? 12_000 : 6_000))
+            s.select(Entity.place(lat: c.latitude,
+                                  lon: c.longitude,
+                                  name: name,
+                                  detail: detail,
+                                  distance: item.pointOfInterestCategory == .airport ? 12_000 : 6_000,
+                                  summary: "Resolved place · \(Fmt.coord(c.latitude, c.longitude))",
+                                  extraMeta: extraMeta))
         }
+    }
+
+    private func placeMetadata(from p: MKPlacemark) -> [MetaRow] {
+        var rows: [MetaRow] = []
+        if let poi = p.pointOfInterestCategory?.rawValue, !poi.isEmpty { rows.append(MetaRow("Category", poi.replacingOccurrences(of: "_", with: " ").capitalized)) }
+        let address = [p.subThoroughfare, p.thoroughfare, p.subLocality, p.locality, p.administrativeArea, p.postalCode, p.country]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
+        if !address.isEmpty { rows.append(MetaRow("Address", address)) }
+        if let city = p.locality, !city.isEmpty { rows.append(MetaRow("City", city)) }
+        if let region = p.administrativeArea, !region.isEmpty { rows.append(MetaRow("Region", region)) }
+        if let country = p.country, !country.isEmpty { rows.append(MetaRow("Country", country)) }
+        if let postal = p.postalCode, !postal.isEmpty { rows.append(MetaRow("Postal code", postal)) }
+        if let tz = p.timeZone?.identifier, !tz.isEmpty { rows.append(MetaRow("Time zone", tz)) }
+        return rows
     }
 
     private func pickParcel(_ p: ParcelRecord) {

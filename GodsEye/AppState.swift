@@ -851,14 +851,28 @@ final class AppState: ObservableObject {
         }
     }
 
-    func reverseGeocode(_ c: CLLocationCoordinate2D) async -> (title: String, detail: String) {
+    func reverseGeocode(_ c: CLLocationCoordinate2D) async -> (title: String, detail: String, extraMeta: [MetaRow]) {
         let loc = CLLocation(latitude: c.latitude, longitude: c.longitude)
         guard let p = try? await geocoder.reverseGeocodeLocation(loc).first else {
-            return (Fmt.coord(c.latitude, c.longitude), "Unresolved position")
+            return (Fmt.coord(c.latitude, c.longitude), "Unresolved position", [])
         }
         let title = p.locality ?? p.subAdministrativeArea ?? p.administrativeArea ?? p.country ?? p.ocean ?? p.inlandWater ?? Fmt.coord(c.latitude, c.longitude)
         let detail = [p.name, p.administrativeArea, p.country].compactMap { $0 }.filter { $0 != title }.joined(separator: ", ")
-        return (title, detail.isEmpty ? "Location" : detail)
+
+        var meta: [MetaRow] = []
+        let address = [p.subThoroughfare, p.thoroughfare, p.subLocality, p.locality, p.administrativeArea, p.postalCode, p.country]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
+        if !address.isEmpty { meta.append(MetaRow("Address", address)) }
+        if let area = p.subLocality, !area.isEmpty { meta.append(MetaRow("Neighborhood", area)) }
+        if let city = p.locality, !city.isEmpty { meta.append(MetaRow("City", city)) }
+        if let region = p.administrativeArea, !region.isEmpty { meta.append(MetaRow("Region", region)) }
+        if let country = p.country, !country.isEmpty { meta.append(MetaRow("Country", country)) }
+        if let postal = p.postalCode, !postal.isEmpty { meta.append(MetaRow("Postal code", postal)) }
+        if let tz = p.timeZone?.identifier, !tz.isEmpty { meta.append(MetaRow("Time zone", tz)) }
+
+        return (title, detail.isEmpty ? "Location" : detail, meta)
     }
 
     func fly(to c: CLLocationCoordinate2D, distance d: Double, pitch: Double = 0, heading: Double = 0, duration: Double = 1.2) {
@@ -909,7 +923,12 @@ final class AppState: ObservableObject {
         let d = distance
         Task {
             let r = await reverseGeocode(c)
-            select(Entity.place(lat: c.latitude, lon: c.longitude, name: r.title, detail: r.detail, distance: min(max(d * 0.35, 3_000), 600_000)))
+            select(Entity.place(lat: c.latitude,
+                                lon: c.longitude,
+                                name: r.title,
+                                detail: r.detail,
+                                distance: min(max(d * 0.35, 3_000), 600_000),
+                                extraMeta: r.extraMeta))
         }
     }
 
