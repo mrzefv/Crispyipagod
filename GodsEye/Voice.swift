@@ -112,6 +112,12 @@ enum VoiceCommand: Equatable {
     case nearestCamera
     case annotate(String)
     case clearAnnotations
+    case outline(String)
+    case measure(String, String)
+    case orbit(Bool)
+    case radioNear(String)
+    case issPass
+    case replayLaunch
     case unknown
 
     static func parse(_ raw: String) -> VoiceCommand {
@@ -119,6 +125,27 @@ enum VoiceCommand: Equatable {
         func has(_ words: String...) -> Bool { words.contains { t.contains($0) } }
 
         if has("clear the map", "clear annotations", "clear marks") { return .clearAnnotations }
+        if has("how far is", "distance from", "distance between", "measure from") {
+            var body = t
+            for p in ["how far is", "distance from", "distance between", "measure from", "what is the", "what's the"] { body = body.replacingOccurrences(of: p, with: "") }
+            let sep = body.contains(" from ") ? " from " : (body.contains(" to ") ? " to " : " and ")
+            let parts = body.components(separatedBy: sep).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            if parts.count >= 2 { return .measure(parts[0], parts[1]) }
+        }
+        if has("outline", "draw the border", "boundary of", "highlight the state", "highlight the country") {
+            var name = t
+            for p in ["outline the state of", "outline the country of", "outline", "draw the border of", "boundary of", "highlight the state of", "highlight the country of", "the"] { name = name.replacingOccurrences(of: p, with: " ") }
+            name = name.trimmingCharacters(in: .whitespaces)
+            if !name.isEmpty { return .outline(name) }
+        }
+        if has("orbit") { return .orbit(!has("stop", "off")) }
+        if has("play radio", "radio near", "radio station", "tune to") {
+            var place = t
+            for p in ["play a news radio station near", "play radio near", "play a radio station near", "radio station near", "radio near", "tune to", "play radio"] { place = place.replacingOccurrences(of: p, with: "") }
+            return .radioNear(place.trimmingCharacters(in: .whitespaces).ifEmpty("here"))
+        }
+        if has("iss pass", "when does the iss", "next iss", "space station pass") { return .issPass }
+        if has("replay the launch", "launch replay", "replay launch", "play the launch") { return .replayLaunch }
         if has("mark this", "annotate", "drop a pin", "mark here") {
             let label = t.replacingOccurrences(of: "mark this as", with: "").replacingOccurrences(of: "annotate", with: "").replacingOccurrences(of: "mark here", with: "").replacingOccurrences(of: "mark this", with: "").replacingOccurrences(of: "drop a pin", with: "").trimmingCharacters(in: .whitespaces)
             return .annotate(label.isEmpty ? "MARK" : label.uppercased())

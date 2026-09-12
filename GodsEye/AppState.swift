@@ -2,6 +2,18 @@ import Foundation
 import SwiftUI
 import MapKit
 import CoreLocation
+import BackgroundTasks
+import UserNotifications
+
+struct RegionOutline: Identifiable {
+    let id = UUID()
+    let name: String
+    let rings: [[CLLocationCoordinate2D]]
+}
+
+extension Keyframe {
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+}
 
 struct Annotation2D: Identifiable, Equatable {
     let id = UUID()
@@ -33,6 +45,12 @@ final class AppState: ObservableObject {
             if layers.contains(.satellites) && propagators.isEmpty { Task { await refreshSatellites() } }
             if layers.contains(.cctv) && cameras.isEmpty { Task { await refreshCameras() } }
             if layers.contains(.ships) { connectAIS() } else { ais.disconnect() }
+            if layers.contains(.fires) && fires.isEmpty { Task { await refreshFires() } }
+            if layers.contains(.radio) && radioStations.isEmpty { Task { await refreshRadio() } }
+            if layers.contains(.cables) && cables.isEmpty { Task { await refreshCables() } }
+            if layers.contains(.bikeshare) { Task { await refreshBikes() } }
+            if layers.contains(.infra) { Task { await refreshInfra() } }
+            if layers.contains(.airport) { Task { await refreshAirport() } }
         }
     }
     @Published var contacts: [Contact] = [] { didSet { rebuildDisplay(); trackTick(fromPoll: true) } }
@@ -41,6 +59,16 @@ final class AppState: ObservableObject {
     @Published var ships: [String: Ship] = [:]
     @Published var satellites: [Satellite] = []
     @Published var cameras: [Camera] = []
+    @Published var fires: [Fire] = [] { didSet { rebuildDisplay() } }
+    @Published var bikes: [BikeStation] = []
+    @Published var radioStations: [RadioStation] = []
+    @Published var infra: [InfraNode] = []
+    @Published var airportFeatures: [AirportFeature] = []
+    @Published var cables: [Cable] = []
+    @Published private(set) var visibleFires: [Fire] = []
+    @Published private(set) var visibleBikes: [BikeStation] = []
+    @Published private(set) var visibleRadio: [RadioStation] = []
+    @Published private(set) var visibleCables: [Cable] = []
     @Published var iss: SatPos?
     @Published var launches: [Launch] = []
     @Published var lastUpdate: Date?
@@ -62,13 +90,41 @@ final class AppState: ObservableObject {
     @Published var status = "Initializing…"
     @Published var ready = false
     @Published var toast: String?
-    @Published var pendingSharedView: URL?
 
     // Modes
     @Published var sensor: SensorMode { didSet { ud.set(sensor.rawValue, forKey: "sensor") } }
     @Published var hud: Bool { didSet { ud.set(hud, forKey: "hud") } }
     @Published var detection: Bool { didSet { ud.set(detection, forKey: "detection") } }
     @Published var annotations: [Annotation2D] = []
+    @Published var regions: [RegionOutline] = []
+    @Published var measureMode = false
+    @Published var measureA: CLLocationCoordinate2D?
+    @Published var measureB: CLLocationCoordinate2D?
+    @Published var measureLine: [CLLocationCoordinate2D] = []
+    @Published var orbiting = false
+    @Published var wakes: Bool { didSet { ud.set(wakes, forKey: "wakes") } }
+    @Published var viewsheds: Bool { didSet { ud.set(viewsheds, forKey: "viewsheds") } }
+    @Published var aiSummary = ""
+    @Published var traceHistory: [CLLocationCoordinate2D] = []
+    @Published var weather: Weather?
+    @Published var passes: [ISSPass] = []
+    @Published var showRadio = false
+    @Published var showReplay = false
+    @Published var showScenes = false
+    @Published var showQR = false
+    @Published var replay: LaunchReplay?
+    @Published var replayT: Double = 0
+    @Published var replayRate: Double = 1
+    @Published var replayPlaying = false
+    @Published var keyframes: [Keyframe] = []
+    @Published var scenePlaying = false
+    let radio = RadioPlayer()
+    private var orbitTask: Task<Void, Never>?
+    private var replayTask: Task<Void, Never>?
+    private var sceneTask: Task<Void, Never>?
+    private var aiTask: Task<Void, Never>?
+    private var weatherTask: Task<Void, Never>?
+    private var lastRegionFetch: (center: CLLocationCoordinate2D, at: Date)?
 
     // Tracking
     @Published var trackedID: String?
@@ -105,6 +161,13 @@ final class AppState: ObservableObject {
     @Published var offlineMode: Bool { didSet { ud.set(offlineMode, forKey: "offline"); Feeds.shared.offline = offlineMode } }
     @Published var showLabels: Bool { didSet { ud.set(showLabels, forKey: "labels") } }
     @Published var aisKey: String { didSet { ud.set(aisKey, forKey: "aisKey"); if layers.contains(.ships) { connectAIS() } } }
+    @Published var firmsKey: String { didSet { ud.set(firmsKey, forKey: "firmsKey"); if layers.contains(.fires) { Task { await refreshFires() } } } }
+    @Published var anthropicKey: String { didSet { ud.set(anthropicKey, forKey: "anthropicKey") } }
+    @Published var aiModel: String { didSet { ud.set(aiModel, forKey: "aiModel") } }
+    @Published var alertMilitary: Bool { didSet { ud.set(alertMilitary, forKey: "alertMil"); if alertMilitary { Alerts.shared.requestPermission() } } }
+    @Published var alertQuakes: Bool { didSet { ud.set(alertQuakes, forKey: "alertEq"); if alertQuakes { Alerts.shared.requestPermission() } } }
+    @Published var alertISS: Bool { didSet { ud.set(alertISS, forKey: "alertIss"); if alertISS { Alerts.shared.requestPermission(); computePasses() } } }
+    @Published var alertQuakeMag: Double { didSet { ud.set(alertQuakeMag, forKey: "alertEqMag") } }
     @Published var cacheBytes: Int64 = FeedCache.size()
 
     let location = LocationService()
@@ -132,6 +195,15 @@ final class AppState: ObservableObject {
         offlineMode = ud.bool(forKey: "offline")
         showLabels = ud.object(forKey: "labels") as? Bool ?? true
         aisKey = ud.string(forKey: "aisKey") ?? ""
+        firmsKey = ud.string(forKey: "firmsKey") ?? ""
+        anthropicKey = ud.string(forKey: "anthropicKey") ?? ""
+        aiModel = ud.string(forKey: "aiModel") ?? "claude-sonnet-5"
+        alertMilitary = ud.bool(forKey: "alertMil")
+        alertQuakes = ud.bool(forKey: "alertEq")
+        alertISS = ud.bool(forKey: "alertIss")
+        alertQuakeMag = ud.object(forKey: "alertEqMag") as? Double ?? 5.0
+        wakes = ud.object(forKey: "wakes") as? Bool ?? true
+        viewsheds = ud.bool(forKey: "viewsheds")
         sensor = SensorMode(rawValue: ud.string(forKey: "sensor") ?? "") ?? .normal
         hud = ud.bool(forKey: "hud")
         detection = ud.bool(forKey: "detection")
@@ -140,6 +212,7 @@ final class AppState: ObservableObject {
         voice.onCommand = { [weak self] text in self?.handleVoice(text) }
         ais.onShip = { [weak self] ship in self?.ingest(ship) }
         ais.onStatus = { [weak self] st in self?.aisStatus = st }
+        UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
     }
 
     // MARK: Derived
@@ -232,6 +305,34 @@ final class AppState: ObservableObject {
                 .map(\.0))
         }
         if cams != visibleCameras { visibleCameras = cams }
+
+        var fr: [Fire] = []
+        if layers.contains(.fires) {
+            let cap = distance > 3_000_000 ? 300 : (performanceMode ? 500 : 900)
+            fr = Array(fires.prefix(cap))
+        }
+        if fr != visibleFires { visibleFires = fr }
+
+        var bk: [BikeStation] = []
+        if layers.contains(.bikeshare), distance < 60_000 {
+            bk = Array(bikes.map { ($0, $0.coord.distance(to: cen)) }.sorted { $0.1 < $1.1 }.prefix(250).map(\.0))
+        }
+        if bk != visibleBikes { visibleBikes = bk }
+
+        var rd: [RadioStation] = []
+        if layers.contains(.radio) {
+            rd = distance > 6_000_000 ? Array(radioStations.prefix(300))
+               : Array(radioStations.map { ($0, $0.coord.distance(to: cen)) }.sorted { $0.1 < $1.1 }.prefix(200).map(\.0))
+        }
+        if rd != visibleRadio { visibleRadio = rd }
+
+        var cb: [Cable] = []
+        if layers.contains(.cables), distance < 9_000_000 {
+            let s = min(80.0, max(1.0, distance / 111_000))
+            cb = cables.filter { $0.maxLat >= cen.latitude - s && $0.minLat <= cen.latitude + s && $0.maxLon >= cen.longitude - s * 1.5 && $0.minLon <= cen.longitude + s * 1.5 }
+            cb = Array(cb.prefix(performanceMode ? 60 : 140))
+        }
+        if cb != visibleCables { visibleCables = cb }
     }
 
     var visibleLaunches: [Launch] { layers.contains(.launches) ? launches : [] }
@@ -297,10 +398,10 @@ final class AppState: ObservableObject {
         startPolling()
         startSatelliteTicker()
         if layers.contains(.ships) { connectAIS() }
-        if let u = pendingDeepLink {
-            pendingDeepLink = nil
-            pendingSharedView = u
-        }
+        if layers.contains(.radio) { await refreshRadio() }
+        if layers.contains(.cables) { await refreshCables() }
+        registerBackgroundTasks()
+        if let u = pendingDeepLink { pendingDeepLink = nil; open(url: u) }
     }
 
     func startPolling() {
@@ -317,6 +418,9 @@ final class AppState: ObservableObject {
                 if tick % 20 == 0 { await self.refreshQuakes() }
                 if tick % 120 == 0 { await self.refreshLaunches(); await self.refreshSatellites() }
                 if tick % 6 == 0 { self.rebuildDisplay() }
+                if tick % 8 == 0, self.layers.contains(.bikeshare) { await self.refreshBikes() }
+                if tick % 40 == 0, self.layers.contains(.fires) { await self.refreshFires() }
+                self.checkAlerts()
                 self.cacheBytes = FeedCache.size()
             }
         }
@@ -400,7 +504,40 @@ final class AppState: ObservableObject {
         do { cameras = try await Feeds.shared.cameras(); rebuildDisplay() } catch { feedErrors += 1 }
     }
 
+    func refreshFires() async {
+        guard layers.contains(.fires), !firmsKey.isEmpty else { return }
+        let span = max(3.0, min(25.0, distance / 120_000))
+        do { fires = try await Feeds.shared.fires(key: firmsKey, center: center, spanDeg: span); checkAlerts() } catch { feedErrors += 1 }
+    }
+
+    func refreshBikes() async {
+        guard layers.contains(.bikeshare), distance < 200_000 else { return }
+        do { bikes = try await Feeds.shared.bikeshare(near: center); rebuildDisplay() } catch { feedErrors += 1 }
+    }
+
+    func refreshRadio() async {
+        do { radioStations = try await Feeds.shared.radio(); rebuildDisplay() } catch { feedErrors += 1 }
+    }
+
+    func refreshInfra() async {
+        guard layers.contains(.infra), distance < 400_000 else { return }
+        do { infra = try await Feeds.shared.infrastructure(center: center, spanDeg: max(0.3, distance / 111_000)) } catch { feedErrors += 1 }
+    }
+
+    func refreshAirport() async {
+        guard layers.contains(.airport), distance < 12_000 else { airportFeatures = []; return }
+        do { airportFeatures = try await Feeds.shared.airport(center: center) } catch { feedErrors += 1 }
+    }
+
+    func refreshCables() async {
+        do { cables = try await Feeds.shared.cables(); rebuildDisplay() } catch { feedErrors += 1 }
+    }
+
     func refreshAll() async {
+        if layers.contains(.fires) { await refreshFires() }
+        if layers.contains(.bikeshare) { await refreshBikes() }
+        if layers.contains(.infra) { await refreshInfra() }
+        if layers.contains(.airport) { await refreshAirport() }
         await refreshContacts(force: true)
         await refreshQuakes()
         await refreshISS()
@@ -457,6 +594,19 @@ final class AppState: ObservableObject {
             Task { await refreshContacts(force: true) }
         }
         if layers.contains(.ships), ais.needsResubscribe(for: center) { connectAIS() }
+        if userMoved && orbiting { stopOrbit() }
+        if userMoved && scenePlaying { stopScene() }
+        let moved = lastRegionFetch.map { $0.center.distance(to: center) > max(distance * 0.5, 5_000) || Date().timeIntervalSince($0.at) > 120 } ?? true
+        if moved {
+            lastRegionFetch = (center, Date())
+            Task {
+                if layers.contains(.bikeshare) { await refreshBikes() }
+                if layers.contains(.infra) { await refreshInfra() }
+                if layers.contains(.airport) { await refreshAirport() }
+                if layers.contains(.fires), fires.isEmpty || distance < 500_000 { await refreshFires() }
+            }
+        }
+        scheduleAISummary()
         geocodeTask?.cancel()
         if distance > 3_000_000 { centerName = "GLOBAL VIEW"; return }
         let c = center
@@ -523,6 +673,7 @@ final class AppState: ObservableObject {
     }
 
     func tapPoint(_ c: CLLocationCoordinate2D) {
+        if measureMode { measureTap(c); return }
         let d = distance
         Task {
             let r = await reverseGeocode(c)
@@ -537,6 +688,7 @@ final class AppState: ObservableObject {
         if b.kind == .satellite, let s = satellites.first(where: { "sat-\($0.id)" == b.id }) { return Entity.from(s) }
         if b.kind == .ship, let v = ships.values.first(where: { "sh-\($0.id)" == b.id }) { return Entity.from(v) }
         if b.kind == .camera, let cam = cameras.first(where: { "cam-\($0.id)" == b.id }) { return Entity.from(cam) }
+        if b.kind == .radio, let r = radioStations.first(where: { "radio-\($0.id)" == b.id }) { return Entity.from(r) }
         return b.entity
     }
 
@@ -580,10 +732,35 @@ final class AppState: ObservableObject {
             satTrack = p.groundTrack(from: Date(), minutes: min(p.periodMinutes, 95), step: 1)
         }
         selected = nil
+        traceHistory = []
+        weather = nil
         startTrackLoop()
         followCamera(animated: true)
         rebuildDisplay()
+        LiveActivityManager.shared.start(e)
+        startWeather()
+        if e.kind == .aircraft || e.kind == .military { Task { await loadTrace(for: e) } }
         show("Tracking \(e.title)")
+    }
+
+    func loadTrace(for e: Entity) async {
+        let hex = e.id.replacingOccurrences(of: "ac-", with: "")
+        guard let pts = try? await Feeds.shared.trace(hex: hex), pts.count > 2 else { return }
+        guard trackedID == e.id else { return }
+        let step = max(1, pts.count / 600)
+        traceHistory = pts.enumerated().filter { $0.offset % step == 0 }.map { $0.element.coord }
+        show("Trace: \(pts.count) fixes · \(Fmt.rel.localizedString(for: pts.first!.time, relativeTo: Date()))")
+    }
+
+    private func startWeather() {
+        weatherTask?.cancel()
+        weatherTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, let c = self.trackedCoord else { return }
+                if let w = try? await Feeds.shared.weather(at: c) { self.weather = w }
+                try? await Task.sleep(nanoseconds: 90_000_000_000)
+            }
+        }
     }
 
     func toggleChase() {
@@ -601,8 +778,14 @@ final class AppState: ObservableObject {
         trail = []
         satTrack = []
         chase = false
+        traceHistory = []
+        weather = nil
         trackTask?.cancel()
         trackTask = nil
+        weatherTask?.cancel()
+        weatherTask = nil
+        LiveActivityManager.shared.end()
+        stopOrbit()
         if !silent { show("Tracking released") }
         rebuildDisplay()
     }
@@ -630,6 +813,7 @@ final class AppState: ObservableObject {
             if trail.count > 240 { trail.removeFirst(trail.count - 240) }
             trackedCoord = c.coord
             followCamera(animated: true)
+            if let te = trackedEntity { LiveActivityManager.shared.update(te, coord: c.coord) }
             return
         }
         guard let fix = lastTrackedFix, fix.gsKt > 0 else { return }
@@ -642,6 +826,7 @@ final class AppState: ObservableObject {
 
     private func followCamera(animated: Bool, duration: Double = 1.2) {
         guard let c = trackedCoord else { return }
+        if orbiting { return }
         let kind = trackedEntity?.kind ?? .aircraft
         if chase {
             let d: Double = kind == .satellite ? 2_500_000 : (kind == .ship ? 1_500 : 2_800)
@@ -713,6 +898,270 @@ final class AppState: ObservableObject {
         directorTask = nil
     }
 
+    // MARK: Orbit mode
+
+    func toggleOrbit() { orbiting ? stopOrbit() : startOrbit() }
+
+    func startOrbit() {
+        orbiting = true
+        stopDirector()
+        show("Orbit: on")
+        orbitTask?.cancel()
+        orbitTask = Task { [weak self] in
+            var h = self?.heading ?? 0
+            while !Task.isCancelled {
+                guard let self, self.orbiting else { return }
+                h = (h + 4).truncatingRemainder(dividingBy: 360)
+                let c = self.trackedCoord ?? self.selected?.coord ?? self.center
+                let d = max(self.distance, 800)
+                self.programmaticMoveUntil = Date().addingTimeInterval(1.2)
+                withAnimation(.linear(duration: 0.5)) {
+                    self.camera = .camera(MapCamera(centerCoordinate: c, distance: d, heading: h, pitch: max(self.pitch, 55)))
+                }
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
+        }
+    }
+
+    func stopOrbit() {
+        guard orbiting else { return }
+        orbiting = false
+        orbitTask?.cancel()
+        orbitTask = nil
+    }
+
+    // MARK: Measure
+
+    func toggleMeasure() {
+        measureMode.toggle()
+        if measureMode { measureA = nil; measureB = nil; measureLine = []; show("Measure: tap two points") }
+    }
+
+    func measureTap(_ c: CLLocationCoordinate2D) {
+        if measureA == nil || measureB != nil { measureA = c; measureB = nil; measureLine = []; return }
+        measureB = c
+        finishMeasure()
+    }
+
+    private func finishMeasure() {
+        guard let a = measureA, let b = measureB else { return }
+        measureLine = Geo.greatCircle(a, b)
+        let km = a.distance(to: b) / 1000
+        show(String(format: "%.1f km · %.0f nm · brg %03.0f°", km, km / 1.852, Geo.bearing(from: a, to: b)))
+    }
+
+    func measure(from p1: String, to p2: String) {
+        Task {
+            async let a = geocode(p1)
+            async let b = geocode(p2)
+            guard let ca = await a, let cb = await b else { show("Couldn't resolve one of those places"); return }
+            measureMode = false
+            measureA = ca; measureB = cb
+            finishMeasure()
+            let mid = Geo.greatCircle(ca, cb, points: 2)[1]
+            fly(to: mid, distance: max(ca.distance(to: cb) * 2.2, 50_000), pitch: 20, duration: 1.8)
+        }
+    }
+
+    func geocode(_ q: String) async -> CLLocationCoordinate2D? {
+        let req = MKLocalSearch.Request()
+        req.naturalLanguageQuery = q
+        req.region = MKCoordinateRegion(center: center, span: MKCoordinateSpan(latitudeDelta: 90, longitudeDelta: 90))
+        return try? await MKLocalSearch(request: req).start().mapItems.first?.placemark.coordinate
+    }
+
+    func clearMeasure() { measureA = nil; measureB = nil; measureLine = []; measureMode = false }
+
+    // MARK: Region outlines
+
+    func outline(_ name: String) {
+        Task {
+            do {
+                let rings = try await Feeds.shared.boundary(named: name)
+                regions.append(RegionOutline(name: name.uppercased(), rings: rings))
+                let all = rings.flatMap { $0 }
+                guard !all.isEmpty else { show("No boundary for \(name)"); return }
+                let lat = (all.map(\.latitude).min()! + all.map(\.latitude).max()!) / 2
+                let lon = (all.map(\.longitude).min()! + all.map(\.longitude).max()!) / 2
+                let span = max(all.map(\.latitude).max()! - all.map(\.latitude).min()!, (all.map(\.longitude).max()! - all.map(\.longitude).min()!) * 0.6)
+                fly(to: CLLocationCoordinate2D(latitude: lat, longitude: lon), distance: max(span * 111_000 * 2.2, 40_000), pitch: 0, duration: 1.8)
+                show("Outlined \(name)")
+            } catch { show("No boundary for \(name)") }
+        }
+    }
+
+    // MARK: Launch replay
+
+    func startReplay(_ l: Launch) {
+        replay = LaunchReplay(l)
+        replayT = 0
+        replayRate = 1
+        selected = nil
+        Task {
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            showReplay = true
+            fly(to: l.coord, distance: 40_000, pitch: 65, heading: replay?.azimuth ?? 90, duration: 1.6)
+        }
+    }
+
+    func replayToggle() { replayPlaying ? replayPause() : replayPlay() }
+
+    func replayPlay() {
+        guard let r = replay else { return }
+        replayPlaying = true
+        if replayT >= LaunchReplay.duration { replayT = 0 }
+        replayTask?.cancel()
+        replayTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard let self, self.replayPlaying else { return }
+                self.replayT = min(LaunchReplay.duration, self.replayT + 0.25 * 10 * self.replayRate)
+                let st = r.state(at: self.replayT)
+                self.programmaticMoveUntil = Date().addingTimeInterval(1)
+                withAnimation(.linear(duration: 0.25)) {
+                    self.camera = .camera(MapCamera(centerCoordinate: st.coord, distance: 40_000 + st.altKm * 12_000, heading: r.azimuth - 40, pitch: 62))
+                }
+                if self.replayT >= LaunchReplay.duration { self.replayPlaying = false; return }
+            }
+        }
+    }
+
+    func replayPause() { replayPlaying = false; replayTask?.cancel(); replayTask = nil }
+
+    func endReplay() { replayPause(); replay = nil; showReplay = false }
+
+    // MARK: Radio tuner
+
+    func tune(_ st: RadioStation) {
+        radio.play(st)
+        fly(to: st.coord, distance: 60_000, pitch: 45, duration: 1.6)
+        show("♪ \(st.name)")
+    }
+
+    func tuneNear(_ place: String) {
+        Task {
+            if radioStations.isEmpty { await refreshRadio() }
+            let c: CLLocationCoordinate2D
+            if place == "here" || place.isEmpty { c = center } else if let g = await geocode(place) { c = g } else { show("Couldn't find \(place)"); return }
+            guard let st = radioStations.min(by: { $0.coord.distance(to: c) < $1.coord.distance(to: c) }) else { return }
+            if !layers.contains(.radio) { layers.insert(.radio) }
+            tune(st)
+        }
+    }
+
+    // MARK: Scenes (keyframe recorder)
+
+    func addKeyframe() {
+        keyframes.append(Keyframe(lat: center.latitude, lon: center.longitude, distance: distance, heading: heading, pitch: pitch))
+        show("Keyframe \(keyframes.count) captured")
+    }
+
+    func playScene() {
+        guard !keyframes.isEmpty else { show("No keyframes"); return }
+        scenePlaying = true
+        stopTracking(silent: true)
+        stopDirector()
+        sceneTask?.cancel()
+        sceneTask = Task { [weak self] in
+            guard let self else { return }
+            for k in self.keyframes {
+                guard !Task.isCancelled, self.scenePlaying else { return }
+                self.fly(to: k.coord, distance: k.distance, pitch: k.pitch, heading: k.heading, duration: k.travel)
+                self.programmaticMoveUntil = Date().addingTimeInterval(k.travel + k.hold + 0.5)
+                try? await Task.sleep(nanoseconds: UInt64((k.travel + k.hold) * 1_000_000_000))
+            }
+            self.scenePlaying = false
+        }
+    }
+
+    func stopScene() { scenePlaying = false; sceneTask?.cancel(); sceneTask = nil }
+
+    func exportScene(named name: String) -> URL? {
+        SceneIO.save(SceneFile(name: name, keyframes: keyframes, sensor: sensor.rawValue, layers: layers.map(\.rawValue)))
+    }
+
+    func importScene(_ url: URL) {
+        guard let sc = SceneIO.load(url) else { show("Couldn't read scene"); return }
+        keyframes = sc.keyframes
+        if let m = SensorMode(rawValue: sc.sensor) { sensor = m }
+        layers = Set(sc.layers.compactMap(Layer.init(rawValue:)))
+        show("Loaded \(sc.name): \(sc.keyframes.count) keyframes")
+    }
+
+    // MARK: AI HUD summary
+
+    func scheduleAISummary() {
+        guard hud, !anthropicKey.isEmpty else { return }
+        aiTask?.cancel()
+        aiTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            let ctx = """
+            View center: \(self.centerName) (\(Fmt.coord(self.center.latitude, self.center.longitude))), camera distance \(Int(self.distance / 1000)) km, pitch \(Int(self.pitch)).
+            Layers: \(self.layers.map(\.rawValue).joined(separator: ",")). Aircraft in view: \(self.visibleContacts.count), military: \(self.visibleContacts.filter(\.military).count), ships: \(self.visibleShips.count), quakes: \(self.visibleQuakes.count), fires: \(self.visibleFires.count), sats: \(self.visibleSatellites.count).
+            Tracking: \(self.trackedEntity.map { "\($0.kind.label) \($0.title) — \($0.summary)" } ?? "none"). Sensor: \(self.sensor.title). Time UTC \(Fmt.utc(Date())).
+            """
+            if let t = try? await Feeds.shared.aiSummary(key: self.anthropicKey, model: self.aiModel, context: ctx) {
+                guard !Task.isCancelled else { return }
+                self.aiSummary = t
+            }
+        }
+    }
+
+    // MARK: ISS passes + alerts
+
+    func computePasses() {
+        guard let me = location.coordinate,
+              let iss = propagators.first(where: { $0.noradID == 25544 }) else { return }
+        passes = PassPredictor.passes(iss, observer: me)
+        if alertISS, let next = passes.first {
+            Alerts.shared.schedule(id: "iss-\(Int(next.start.timeIntervalSince1970))",
+                                   title: "ISS pass in 10 min",
+                                   body: String(format: "Max elevation ~%.0f° at %@", next.maxElevationDeg, Fmt.time(next.peak)),
+                                   at: next.start.addingTimeInterval(-600))
+        }
+    }
+
+    func checkAlerts() {
+        if alertQuakes {
+            for q in quakes where q.mag >= alertQuakeMag && Date().timeIntervalSince(q.time) < 3600 {
+                Alerts.shared.fire(id: "eq-\(q.id)", title: String(format: "M%.1f earthquake", q.mag), body: q.place)
+            }
+        }
+        if alertMilitary, let me = location.coordinate {
+            for c in (contacts + militaryContacts) where c.military && c.coord.distance(to: me) < 80_000 {
+                Alerts.shared.fire(id: "mil-\(c.id)-\(Calendar.current.component(.hour, from: Date()))",
+                                   title: "Military contact nearby",
+                                   body: "\(c.displayName) \(c.type ?? "") · \(Int(c.coord.distance(to: me) / 1000)) km · \(c.altFt.map { "\($0) ft" } ?? "")")
+            }
+        }
+        if alertISS, passes.isEmpty || (passes.first.map { $0.end < Date() } ?? false) { computePasses() }
+    }
+
+    // MARK: Background refresh
+
+    func registerBackgroundTasks() {
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: "party.mrvek.godseye.refresh", using: nil) { [weak self] task in
+            guard let task = task as? BGAppRefreshTask else { return }
+            Task { @MainActor in
+                self?.scheduleBackgroundRefresh()
+                await self?.refreshQuakes()
+                await self?.refreshContacts(force: true)
+                self?.checkAlerts()
+                task.setTaskCompleted(success: true)
+            }
+            task.expirationHandler = { task.setTaskCompleted(success: false) }
+        }
+        scheduleBackgroundRefresh()
+    }
+
+    func scheduleBackgroundRefresh() {
+        guard alertMilitary || alertQuakes || alertISS else { return }
+        let req = BGAppRefreshTaskRequest(identifier: "party.mrvek.godseye.refresh")
+        req.earliestBeginDate = Date().addingTimeInterval(15 * 60)
+        try? BGTaskScheduler.shared.submit(req)
+    }
+
     // MARK: Annotations (voice whiteboard)
 
     func annotate(_ label: String, at c: CLLocationCoordinate2D? = nil) {
@@ -766,7 +1215,17 @@ final class AppState: ObservableObject {
             let e = trackedEntity ?? selected ?? Entity.place(lat: center.latitude, lon: center.longitude, name: "Center", detail: "", distance: distance)
             handoffToNearestCamera(from: e)
         case .annotate(let label): annotate(label)
-        case .clearAnnotations: clearAnnotations()
+        case .clearAnnotations: clearAnnotations(); regions = []; clearMeasure()
+        case .outline(let name): outline(name)
+        case .measure(let a, let b): measure(from: a, to: b)
+        case .orbit(let on): if on { startOrbit() } else { stopOrbit() }
+        case .radioNear(let place): tuneNear(place)
+        case .issPass:
+            computePasses()
+            if let p = passes.first { show(String(format: "ISS: %@ · max %.0f°", Fmt.rel.localizedString(for: p.start, relativeTo: Date()), p.maxElevationDeg)) }
+            else { show(location.coordinate == nil ? "Need your location for passes" : "No ISS pass in 24h") }
+        case .replayLaunch:
+            if let l = launches.filter({ $0.net < Date() }).last ?? launches.first { startReplay(l) } else { show("No launch loaded") }
         case .unknown: show("Didn't catch that: “\(text)”")
         }
     }
@@ -789,25 +1248,6 @@ final class AppState: ObservableObject {
             parts.append("title=\(s.title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")")
         }
         return "godseye://view?" + parts.joined(separator: "&")
-    }
-
-    func handleDeepLink(_ url: URL) {
-        guard url.scheme == "godseye" else { return }
-        if ready {
-            pendingSharedView = url
-        } else {
-            pendingDeepLink = url
-        }
-    }
-
-    func dismissPendingSharedView() {
-        pendingSharedView = nil
-    }
-
-    func applyPendingSharedView() {
-        guard let url = pendingSharedView else { return }
-        pendingSharedView = nil
-        open(url: url)
     }
 
     func open(url: URL) {

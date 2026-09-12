@@ -5,7 +5,7 @@ import SwiftUI
 // MARK: - Layers
 
 enum Layer: String, CaseIterable, Identifiable, Codable {
-    case flights, military, ships, satellites, quakes, launches, cctv, traffic
+    case flights, military, ships, satellites, quakes, launches, cctv, traffic, fires, bikeshare, radio, infra, cables, airport
     var id: String { rawValue }
 
     var title: String {
@@ -18,6 +18,12 @@ enum Layer: String, CaseIterable, Identifiable, Codable {
         case .launches: return "Space Missions"
         case .cctv: return "Public CCTV (London)"
         case .traffic: return "Traffic Flow"
+        case .fires: return "Active Fires (24h)"
+        case .bikeshare: return "Bikeshare"
+        case .radio: return "World Radio"
+        case .infra: return "Infrastructure"
+        case .cables: return "Submarine Cables"
+        case .airport: return "Airport Detail"
         }
     }
     var icon: String {
@@ -30,6 +36,12 @@ enum Layer: String, CaseIterable, Identifiable, Codable {
         case .launches: return "flame"
         case .cctv: return "video"
         case .traffic: return "car.2"
+        case .fires: return "flame.circle"
+        case .bikeshare: return "bicycle"
+        case .radio: return "radio"
+        case .infra: return "server.rack"
+        case .cables: return "cable.connector"
+        case .airport: return "airplane.arrival"
         }
     }
     var source: String {
@@ -42,9 +54,15 @@ enum Layer: String, CaseIterable, Identifiable, Codable {
         case .launches: return "Launch Library 2"
         case .cctv: return "TfL JamCams"
         case .traffic: return "Apple Maps"
+        case .fires: return "NASA FIRMS (key)"
+        case .bikeshare: return "GBFS"
+        case .radio: return "Radio Browser"
+        case .infra: return "OSM Overpass"
+        case .cables: return "TeleGeography"
+        case .airport: return "OSM Overpass"
         }
     }
-    var needsKey: Bool { self == .ships }
+    var needsKey: Bool { self == .ships || self == .fires }
 }
 
 // MARK: - Sensor modes / missions
@@ -404,6 +422,148 @@ struct Camera: Identifiable, Equatable {
     }
 }
 
+// MARK: - Fires (NASA FIRMS CSV)
+
+struct Fire: Identifiable, Equatable {
+    let id: String
+    let lat: Double
+    let lon: Double
+    let frp: Double
+    let brightness: Double
+    let confidence: String
+    let time: Date
+    let satellite: String
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+}
+
+// MARK: - Bikeshare (GBFS)
+
+struct GBFSSystem { let name: String; let lat: Double; let lon: Double; let base: String }
+struct GBFSInfo: Decodable { let data: D; struct D: Decodable { let stations: [Lossy<St>] }
+    struct St: Decodable { let station_id: String; let name: String; let lat: Double; let lon: Double; let capacity: Int? } }
+struct GBFSStatus: Decodable { let data: D; struct D: Decodable { let stations: [Lossy<St>] }
+    struct St: Decodable { let station_id: String; let num_bikes_available: Int?; let num_docks_available: Int? } }
+
+struct BikeStation: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let lat: Double
+    let lon: Double
+    var bikes: Int
+    var docks: Int
+    let system: String
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+}
+
+// MARK: - Radio (Radio Browser)
+
+struct RadioStation: Identifiable, Decodable, Equatable {
+    let stationuuid: String
+    let name: String
+    let url_resolved: String
+    let country: String
+    let geo_lat: Double?
+    let geo_long: Double?
+    let tags: String?
+    let codec: String?
+    let clickcount: Int?
+    var id: String { stationuuid }
+    var lat: Double { geo_lat ?? 0 }
+    var lon: Double { geo_long ?? 0 }
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+}
+
+// MARK: - OSM Overpass (infra + airport)
+
+struct OverpassResponse: Decodable {
+    let elements: [Lossy<El>]
+    struct El: Decodable {
+        let type: String
+        let id: Int
+        let lat: Double?
+        let lon: Double?
+        let center: Center?
+        let tags: [String: String]?
+        let geometry: [Center]?
+        struct Center: Decodable { let lat: Double; let lon: Double }
+    }
+}
+
+struct InfraNode: Identifiable, Equatable {
+    enum Kind: String { case datacenter, dam, power, substation
+        var icon: String { switch self { case .datacenter: return "server.rack"; case .dam: return "water.waves"; case .power: return "bolt.fill"; case .substation: return "bolt.square" } }
+        var label: String { rawValue.uppercased() }
+    }
+    let id: String
+    let kind: Kind
+    let name: String
+    let lat: Double
+    let lon: Double
+    let tags: [String: String]
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+}
+
+struct AirportFeature: Identifiable, Equatable {
+    enum Kind { case runway, taxiway, apron, terminal }
+    let id: String
+    let kind: Kind
+    let name: String
+    let points: [CLLocationCoordinate2D]
+    static func == (a: AirportFeature, b: AirportFeature) -> Bool { a.id == b.id }
+}
+
+// MARK: - Submarine cables (TeleGeography public geojson)
+
+struct Cable: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let color: String
+    let segments: [[CLLocationCoordinate2D]]
+    let minLat: Double, maxLat: Double, minLon: Double, maxLon: Double
+    static func == (a: Cable, b: Cable) -> Bool { a.id == b.id }
+}
+
+// MARK: - Scenes, passes, measurement
+
+struct Keyframe: Identifiable, Codable, Equatable {
+    var id = UUID()
+    var lat: Double
+    var lon: Double
+    var distance: Double
+    var heading: Double
+    var pitch: Double
+    var hold: Double = 3
+    var travel: Double = 3
+}
+
+struct SceneFile: Codable {
+    var name: String
+    var keyframes: [Keyframe]
+    var sensor: String
+    var layers: [String]
+}
+
+struct ISSPass: Identifiable, Equatable {
+    let id = UUID()
+    let start: Date
+    let peak: Date
+    let end: Date
+    let maxElevationDeg: Double
+    let minGroundKm: Double
+}
+
+struct Weather: Equatable {
+    let tempC: Double
+    let windKt: Double
+    let windDir: Double
+    let cloudPct: Double
+    let visibilityM: Double
+    let fetched: Date
+    var text: String {
+        String(format: "%.0f°C · WIND %03.0f°/%.0fkt · CLD %.0f%% · VIS %.0fkm", tempC, windDir, windKt, cloudPct, visibilityM / 1000)
+    }
+}
+
 // MARK: - Unified entity (what the detail sheet renders)
 
 struct MetaRow: Identifiable, Equatable {
@@ -415,7 +575,7 @@ struct MetaRow: Identifiable, Equatable {
 
 struct Entity: Identifiable, Equatable {
     enum Kind: String, Codable, CaseIterable {
-        case aircraft, military, ship, earthquake, satellite, launch, camera, place
+        case aircraft, military, ship, earthquake, satellite, launch, camera, place, fire, bike, radio, infra, cable
         var icon: String {
             switch self {
             case .aircraft: return "airplane"
@@ -426,6 +586,11 @@ struct Entity: Identifiable, Equatable {
             case .launch: return "flame"
             case .camera: return "video"
             case .place: return "mappin.and.ellipse"
+            case .fire: return "flame.circle"
+            case .bike: return "bicycle"
+            case .radio: return "radio"
+            case .infra: return "server.rack"
+            case .cable: return "cable.connector"
             }
         }
         var label: String {
@@ -438,6 +603,11 @@ struct Entity: Identifiable, Equatable {
             case .launch: return "LAUNCH"
             case .camera: return "CAMERA"
             case .place: return "LOCATION"
+            case .fire: return "THERMAL"
+            case .bike: return "BIKESHARE"
+            case .radio: return "RADIO"
+            case .infra: return "INFRA"
+            case .cable: return "CABLE"
             }
         }
         var color: Color {
@@ -450,6 +620,11 @@ struct Entity: Identifiable, Equatable {
             case .launch: return .pink
             case .camera: return .purple
             case .place: return .white
+            case .fire: return Color(red: 1.0, green: 0.4, blue: 0.1)
+            case .bike: return .mint
+            case .radio: return .yellow
+            case .infra: return .teal
+            case .cable: return .indigo
             }
         }
         var trackable: Bool { self == .aircraft || self == .military || self == .ship || self == .satellite }
@@ -560,6 +735,72 @@ struct Entity: Identifiable, Equatable {
             url: cam.videoURL ?? cam.imageURL,
             viewDistance: 1_200,
             imageURL: cam.imageURL)
+    }
+
+    static func from(_ f: Fire) -> Entity {
+        Entity(
+            id: "fire-\(f.id)",
+            kind: .fire,
+            title: String(format: "FRP %.0f MW", f.frp),
+            subtitle: "\(f.satellite) · confidence \(f.confidence)",
+            summary: "Thermal anomaly · brightness \(Int(f.brightness)) K · \(Fmt.rel.localizedString(for: f.time, relativeTo: Date()))",
+            lat: f.lat, lon: f.lon, time: f.time,
+            meta: [MetaRow("FRP", String(format: "%.1f MW", f.frp)), MetaRow("Brightness", "\(Int(f.brightness)) K"),
+                   MetaRow("Confidence", f.confidence), MetaRow("Acquired (UTC)", Fmt.utc(f.time)), MetaRow("Source", "NASA FIRMS VIIRS")],
+            url: "https://firms.modaps.eosdis.nasa.gov/map/#d:24hrs;@\(f.lon),\(f.lat),9z",
+            viewDistance: 60_000)
+    }
+
+    static func from(_ b: BikeStation) -> Entity {
+        Entity(
+            id: "bike-\(b.id)",
+            kind: .bike,
+            title: b.name,
+            subtitle: b.system,
+            summary: "\(b.bikes) bikes · \(b.docks) docks available",
+            lat: b.lat, lon: b.lon, time: Date(),
+            meta: [MetaRow("Bikes", "\(b.bikes)"), MetaRow("Docks", "\(b.docks)"), MetaRow("Station ID", b.id), MetaRow("Source", "GBFS")],
+            url: nil, viewDistance: 1_500)
+    }
+
+    static func from(_ r: RadioStation) -> Entity {
+        Entity(
+            id: "radio-\(r.id)",
+            kind: .radio,
+            title: r.name,
+            subtitle: r.country,
+            summary: "\(r.codec ?? "stream") · \(r.tags ?? "") · \(r.clickcount ?? 0) listens",
+            lat: r.lat, lon: r.lon, time: nil,
+            meta: [MetaRow("Country", r.country), MetaRow("Codec", r.codec ?? "—"), MetaRow("Tags", r.tags ?? "—"), MetaRow("Source", "Radio Browser")],
+            url: r.url_resolved, viewDistance: 12_000)
+    }
+
+    static func from(_ n: InfraNode) -> Entity {
+        Entity(
+            id: "infra-\(n.id)",
+            kind: .infra,
+            title: n.name,
+            subtitle: n.kind.label,
+            summary: n.tags.filter { ["operator", "plant:source", "plant:output:electrical", "height", "dam:type"].contains($0.key) }
+                .map { "\($0.key)=\($0.value)" }.joined(separator: " · ").ifEmpty("OSM-mapped \(n.kind.rawValue)"),
+            lat: n.lat, lon: n.lon, time: nil,
+            meta: n.tags.sorted { $0.key < $1.key }.prefix(10).map { MetaRow($0.key, $0.value) } + [MetaRow("Source", "OpenStreetMap")],
+            url: "https://www.openstreetmap.org/\(n.id.replacingOccurrences(of: "-", with: "/"))",
+            viewDistance: 4_000)
+    }
+
+    static func from(_ c: Cable) -> Entity {
+        let mid = c.segments.first.flatMap { $0.count > 0 ? $0[$0.count / 2] : nil } ?? CLLocationCoordinate2D(latitude: 0, longitude: 0)
+        return Entity(
+            id: "cable-\(c.id)",
+            kind: .cable,
+            title: c.name,
+            subtitle: "Submarine cable",
+            summary: "\(c.segments.count) segment(s) · \(c.segments.reduce(0) { $0 + $1.count }) vertices",
+            lat: mid.latitude, lon: mid.longitude, time: nil,
+            meta: [MetaRow("Cable ID", c.id), MetaRow("Source", "TeleGeography")],
+            url: "https://www.submarinecablemap.com/submarine-cable/\(c.id)",
+            viewDistance: 2_000_000)
     }
 
     static func from(_ q: Quake) -> Entity {
@@ -698,4 +939,9 @@ extension CLLocationCoordinate2D {
         CLLocation(latitude: latitude, longitude: longitude)
             .distance(from: CLLocation(latitude: other.latitude, longitude: other.longitude))
     }
+}
+
+
+extension String {
+    func ifEmpty(_ fallback: String) -> String { isEmpty ? fallback : self }
 }

@@ -59,6 +59,21 @@
 			</array>
 		</dict>
 	</array>
+	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>audio</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>party.mrvek.godseye.refresh</string>
+	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Voice commands: navigate, track, and switch sensors hands-free.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

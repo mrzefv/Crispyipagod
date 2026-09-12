@@ -109,6 +109,27 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    SecureField("NASA FIRMS map key", text: $s.firmsKey).font(.system(.body, design: .monospaced)).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    LabeledContent("Fires loaded", value: "\(s.fires.count)")
+                } header: { Text("Power up — Active Fires") } footer: { Text("Free at firms.modaps.eosdis.nasa.gov/api/map_key. VIIRS SNPP, trailing 24h, fetched around the view.") }
+
+                Section {
+                    SecureField("Anthropic API key", text: $s.anthropicKey).font(.system(.body, design: .monospaced)).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    TextField("Model", text: $s.aiModel).font(.system(.body, design: .monospaced)).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    LabeledContent("Last readout", value: s.aiSummary.isEmpty ? "—" : s.aiSummary)
+                } header: { Text("Power up — AI HUD summary") } footer: { Text("Five-word intelligence readout of the current view, regenerated when the camera settles. Needs HUD on. Key stays on-device; calls go straight to api.anthropic.com.") }
+
+                Section {
+                    Toggle("Military contact within 80 km of me", isOn: $s.alertMilitary)
+                    Toggle("Earthquake ≥ magnitude", isOn: $s.alertQuakes)
+                    if s.alertQuakes {
+                        HStack { Text("Threshold"); Slider(value: $s.alertQuakeMag, in: 3...8, step: 0.5); Text(String(format: "%.1f", s.alertQuakeMag)).font(.system(.body, design: .monospaced)) }
+                    }
+                    Toggle("ISS pass in 10 min", isOn: $s.alertISS)
+                    Button("Test notification") { Alerts.shared.requestPermission(); Alerts.shared.fire(id: "test-\(Int(Date().timeIntervalSince1970))", title: "GodsEye", body: "Alerts are working.") }
+                } header: { Text("Alerts") } footer: { Text("Checked every poll while the app is open, plus opportunistic background refresh (iOS decides when). Needs location for military/ISS alerts.") }
+
+                Section {
                     Toggle("Performance mode", isOn: $s.performanceMode)
                         .onChange(of: s.performanceMode) { _, _ in s.startPolling() }
                 } header: { Text("Performance") } footer: {
@@ -143,7 +164,10 @@ struct SettingsView: View {
                              "“Turn on satellites” · “Hide earthquakes”",
                              "“HUD on” · “Detection off” · “Start director”",
                              "“Mark this as target alpha” · “Clear the map”",
-                             "“Nearest camera” · “Reset globe” · “Timeline”"], id: \.self) { t in
+                             "“Nearest camera” · “Reset globe” · “Timeline”",
+                             "“Outline Texas” · “How far is LAX from DFW” · “Orbit”",
+                             "“Play a radio station near Austin” · “When does the ISS pass”",
+                             "“Replay the launch”"], id: \.self) { t in
                         Text(t).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
                     }
                 }
@@ -155,7 +179,7 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    LabeledContent("App", value: "GodsEye 1.1.0")
+                    LabeledContent("App", value: "GodsEye 1.2.0")
                     LabeledContent("Build", value: "MRzefv")
                     LabeledContent("Deep links", value: "godseye://view?…")
                     LabeledContent("Inspired by", value: "gods-eye-view (MIT)")

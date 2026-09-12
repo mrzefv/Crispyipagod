@@ -5,6 +5,21 @@ options:
     iOS: "17.0"
   xcodeVersion: "16.0"
   createIntermediateGroups: true
+settings:
+  base:
+    MARKETING_VERSION: "1.2.0"
+    CURRENT_PROJECT_VERSION: "4"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    SWIFT_VERSION: "5.9"
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGNING_ALLOWED: "NO"
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGN_IDENTITY: ""
+    DEVELOPMENT_TEAM: ""
+    ENABLE_BITCODE: "NO"
+    SWIFT_STRICT_CONCURRENCY: minimal
+    SWIFT_OPTIMIZATION_LEVEL: "-O"
+    GENERATE_INFOPLIST_FILE: "NO"
 targets:
   GodsEye:
     type: application
@@ -13,23 +28,31 @@ targets:
       - path: GodsEye
         excludes:
           - "Info.plist"
+      - path: Shared
+    dependencies:
+      - target: GodsEyeWidgets
+        embed: true
+        codeSign: false
     settings:
       base:
         INFOPLIST_FILE: GodsEye/Info.plist
-        GENERATE_INFOPLIST_FILE: "NO"
         PRODUCT_BUNDLE_IDENTIFIER: party.mrvek.godseye
         PRODUCT_NAME: GodsEye
-        MARKETING_VERSION: "1.1.0"
-        CURRENT_PROJECT_VERSION: "3"
         TARGETED_DEVICE_FAMILY: "1"
-        SWIFT_VERSION: "5.9"
-        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
-        CODE_SIGN_STYLE: Manual
-        CODE_SIGNING_ALLOWED: "NO"
-        CODE_SIGNING_REQUIRED: "NO"
-        CODE_SIGN_IDENTITY: ""
-        DEVELOPMENT_TEAM: ""
-        ENABLE_BITCODE: "NO"
-        SWIFT_STRICT_CONCURRENCY: minimal
-        SWIFT_OPTIMIZATION_LEVEL: "-O"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  GodsEyeWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widgets
+        excludes:
+          - "Info.plist"
+      - path: Shared
+    settings:
+      base:
+        INFOPLIST_FILE: Widgets/Info.plist
+        PRODUCT_BUNDLE_IDENTIFIER: party.mrvek.godseye.widgets
+        PRODUCT_NAME: GodsEyeWidgets
+        TARGETED_DEVICE_FAMILY: "1"
+        SKIP_INSTALL: "YES"
+        ASSETCATALOG_COMPILER_GENERATE_ASSET_SYMBOLS: "NO"

@@ -1,5 +1,6 @@
 import SwiftUI
 import MapKit
+import UniformTypeIdentifiers
 
 struct GlobeView: View {
     @EnvironmentObject var s: AppState
@@ -42,6 +43,34 @@ struct GlobeView: View {
                         .presentationBackground(.ultraThinMaterial)
                 }
             Color.clear.frame(width: 0, height: 0)
+                .sheet(isPresented: $s.showRadio) {
+                    RadioTunerSheet()
+                        .presentationDetents([.fraction(0.34), .large])
+                        .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.34)))
+                        .presentationDragIndicator(.visible)
+                        .presentationBackground(.ultraThinMaterial)
+                }
+            Color.clear.frame(width: 0, height: 0)
+                .sheet(isPresented: $s.showReplay, onDismiss: { s.endReplay() }) {
+                    ReplaySheet()
+                        .presentationDetents([.fraction(0.3)])
+                        .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.3)))
+                        .presentationDragIndicator(.visible)
+                        .presentationBackground(.ultraThinMaterial)
+                }
+            Color.clear.frame(width: 0, height: 0)
+                .sheet(isPresented: $s.showScenes) {
+                    ScenesSheet()
+                        .presentationDetents([.fraction(0.45), .large])
+                        .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.45)))
+                        .presentationDragIndicator(.visible)
+                        .presentationBackground(.ultraThinMaterial)
+                }
+            Color.clear.frame(width: 0, height: 0)
+                .sheet(isPresented: $s.showQR) {
+                    QRSheet().presentationDetents([.medium]).presentationDragIndicator(.visible)
+                }
+            Color.clear.frame(width: 0, height: 0)
                 .sheet(isPresented: $showModes) {
                     ModesSheet()
                         .presentationDetents([.medium])
@@ -55,7 +84,7 @@ struct GlobeView: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(.ultraThinMaterial)
         }
-        .onOpenURL { url in s.handleDeepLink(url) }
+        .onOpenURL { url in s.open(url: url) }
     }
 
     // MARK: Map
@@ -180,6 +209,146 @@ struct GlobeView: View {
                                 .background(RoundedRectangle(cornerRadius: 4).fill(s.accent))
                                 .foregroundStyle(.black)
                             Image(systemName: "mappin").foregroundStyle(s.accent)
+                        }
+                    }
+                    .annotationTitles(.hidden)
+                }
+
+                // Historical trace of tracked aircraft
+                if s.traceHistory.count > 1 {
+                    MapPolyline(coordinates: s.traceHistory)
+                        .stroke(Color.orange.opacity(0.6), style: StrokeStyle(lineWidth: 1.5))
+                }
+
+                // Wakes (short trailing lines behind moving contacts)
+                if s.wakes, s.distance < 800_000 {
+                    ForEach(s.visibleContacts) { c in
+                        if let gs = c.groundSpeedKt, gs > 40 {
+                            MapPolyline(coordinates: [c.coord, c.coord.moved(meters: -gs * 0.514 * 90, bearing: c.track)])
+                                .stroke((c.military ? Color.orange : s.accent).opacity(0.45), lineWidth: 1.5)
+                        }
+                    }
+                    ForEach(s.visibleShips) { v in
+                        if v.sogKt > 1 {
+                            MapPolyline(coordinates: [v.coord, v.coord.moved(meters: -v.sogKt * 0.514 * 600, bearing: v.cog)])
+                                .stroke(Color.blue.opacity(0.45), lineWidth: 1.5)
+                        }
+                    }
+                }
+
+                // Fires
+                ForEach(s.visibleFires) { f in
+                    Annotation("", coordinate: f.coord, anchor: .center) {
+                        Circle().fill(Entity.Kind.fire.color.opacity(0.75))
+                            .frame(width: min(4 + f.frp / 8, 16), height: min(4 + f.frp / 8, 16))
+                            .frame(width: 20, height: 20).contentShape(Rectangle())
+                            .onTapGesture { s.select(Entity.from(f)) }
+                    }
+                    .annotationTitles(.hidden)
+                }
+
+                // Bikeshare
+                ForEach(s.visibleBikes) { b in
+                    Annotation(b.name, coordinate: b.coord, anchor: .center) {
+                        ZStack {
+                            Circle().fill(Color.mint.opacity(0.25)).frame(width: 20, height: 20)
+                            Text(b.bikes >= 0 ? "\(b.bikes)" : "?").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(.mint)
+                        }
+                        .frame(width: 24, height: 24).contentShape(Rectangle())
+                        .onTapGesture { s.select(Entity.from(b)) }
+                    }
+                    .annotationTitles(.hidden)
+                }
+
+                // Radio
+                ForEach(s.visibleRadio) { r in
+                    Annotation(r.name, coordinate: r.coord, anchor: .center) {
+                        Image(systemName: s.radio.current?.id == r.id ? "dot.radiowaves.left.and.right" : "radio")
+                            .font(.system(size: 10, weight: .bold)).foregroundStyle(.yellow)
+                            .frame(width: 22, height: 22).contentShape(Rectangle())
+                            .onTapGesture { s.select(Entity.from(r)) }
+                    }
+                    .annotationTitles(.hidden)
+                }
+
+                // Infrastructure
+                if s.layers.contains(.infra), s.distance < 400_000 {
+                    ForEach(s.infra) { n in
+                        Annotation(n.name, coordinate: n.coord, anchor: .center) {
+                            Image(systemName: n.kind.icon).font(.system(size: 10, weight: .bold)).foregroundStyle(.teal)
+                                .frame(width: 22, height: 22).contentShape(Rectangle())
+                                .onTapGesture { s.select(Entity.from(n)) }
+                        }
+                        .annotationTitles(s.distance < 30_000 && s.showLabels ? .visible : .hidden)
+                    }
+                }
+
+                // Airport surfaces
+                if s.layers.contains(.airport) {
+                    ForEach(s.airportFeatures) { f in
+                        switch f.kind {
+                        case .runway: MapPolyline(coordinates: f.points).stroke(Color.white.opacity(0.85), lineWidth: 5)
+                        case .taxiway: MapPolyline(coordinates: f.points).stroke(Color.yellow.opacity(0.7), lineWidth: 2)
+                        case .apron: MapPolygon(coordinates: f.points).foregroundStyle(Color.gray.opacity(0.18)).stroke(Color.gray.opacity(0.5), lineWidth: 1)
+                        case .terminal: MapPolygon(coordinates: f.points).foregroundStyle(Color.cyan.opacity(0.15)).stroke(Color.cyan.opacity(0.6), lineWidth: 1)
+                        }
+                    }
+                }
+
+                // Submarine cables
+                ForEach(s.visibleCables) { cable in
+                    ForEach(Array(cable.segments.enumerated()), id: \.offset) { seg in
+                        MapPolyline(coordinates: seg.element)
+                            .stroke(Color(hex: cable.color).opacity(0.8), lineWidth: 1.5)
+                    }
+                }
+
+                // Camera viewsheds
+                if s.viewsheds, s.layers.contains(.cctv), s.distance < 6_000 {
+                    ForEach(s.visibleCameras) { cam in
+                        MapPolygon(coordinates: Geo.cone(at: cam.coord, heading: Geo.stableHeading(for: cam.id)))
+                            .foregroundStyle(Color.purple.opacity(0.18))
+                            .stroke(Color.purple.opacity(0.6), lineWidth: 1)
+                    }
+                }
+
+                // Region outlines
+                ForEach(s.regions) { r in
+                    ForEach(Array(r.rings.enumerated()), id: \.offset) { ring in
+                        MapPolygon(coordinates: ring.element)
+                            .foregroundStyle(s.accent.opacity(0.10))
+                            .stroke(s.accent, lineWidth: 2)
+                    }
+                }
+
+                // Measure
+                if s.measureLine.count > 1 {
+                    MapPolyline(coordinates: s.measureLine).stroke(Color.white, style: StrokeStyle(lineWidth: 2, dash: [8, 6]))
+                }
+                if let a = s.measureA {
+                    Annotation("A", coordinate: a, anchor: .center) { Image(systemName: "a.circle.fill").font(.title3).foregroundStyle(.white) }
+                }
+                if let b = s.measureB, let a = s.measureA {
+                    Annotation("B", coordinate: b, anchor: .center) { Image(systemName: "b.circle.fill").font(.title3).foregroundStyle(.white) }
+                    Annotation("", coordinate: Geo.greatCircle(a, b, points: 2)[1], anchor: .bottom) {
+                        Text(String(format: "%.1f km", a.distance(to: b) / 1000))
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .padding(.horizontal, 6).padding(.vertical, 3)
+                            .background(RoundedRectangle(cornerRadius: 4).fill(Color.black.opacity(0.7)))
+                    }
+                    .annotationTitles(.hidden)
+                }
+
+                // Launch replay
+                if let r = s.replay {
+                    let st = r.state(at: s.replayT)
+                    MapPolyline(coordinates: r.track(upTo: s.replayT)).stroke(Color.pink, lineWidth: 3)
+                    MapPolyline(coordinates: r.track(upTo: LaunchReplay.duration)).stroke(Color.pink.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [4, 6]))
+                    Annotation("", coordinate: st.coord, anchor: .center) {
+                        VStack(spacing: 2) {
+                            Image(systemName: "paperplane.fill").rotationEffect(.degrees(r.azimuth - 45)).foregroundStyle(.pink).font(.title3)
+                            Text("\(st.phase) · \(Int(st.altKm)) km").font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .padding(.horizontal, 4).background(Color.black.opacity(0.7))
                         }
                     }
                     .annotationTitles(.hidden)
@@ -336,7 +505,7 @@ struct TrackingBar: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("TRACKING · \(e.title)")
                         .font(.system(size: 11, weight: .bold, design: .monospaced)).lineLimit(1)
-                    Text(e.summary).font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(s.weather.map { "WX " + $0.text } ?? e.summary).font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer()
                 Button { s.stepRoster(forward: false) } label: { Image(systemName: "chevron.left") }
@@ -412,6 +581,14 @@ struct BottomPanel: View {
                 QuickAction(icon: "camera.aperture", title: "Modes", active: s.sensor != .normal || s.hud || s.detection) { showModes = true }
                 QuickAction(icon: s.directing ? "stop.fill" : "film", title: "Director", active: s.directing) { s.toggleDirector() }
                 QuickAction(icon: "square.3.layers.3d", title: "Layers") { showLayers = true }
+            }
+            HStack(spacing: 6) {
+                QuickAction(icon: "ruler", title: "Measure", active: s.measureMode) { if s.measureMode { s.clearMeasure() } else { s.toggleMeasure() } }
+                QuickAction(icon: "rotate.3d", title: "Orbit", active: s.orbiting) { s.toggleOrbit() }
+                QuickAction(icon: "radio", title: "Radio", active: s.radio.playing) { s.showRadio = true }
+                QuickAction(icon: "record.circle", title: "Scenes", active: s.scenePlaying) { s.showScenes = true }
+                QuickAction(icon: "qrcode", title: "QR") { s.showQR = true }
+                QuickAction(icon: "arrow.clockwise", title: "Refresh") { Task { await s.refreshAll() } }
             }
         }
         .padding(10)
@@ -652,6 +829,12 @@ struct LayersSheet: View {
         case .launches: return "\(s.launches.count) missions"
         case .cctv: return "\(s.cameras.count) cameras"
         case .traffic: return "live flow on basemap"
+        case .fires: return s.firmsKey.isEmpty ? "needs key" : "\(s.fires.count) detections"
+        case .bikeshare: return s.bikes.isEmpty ? "zoom into a supported city" : "\(s.bikes.count) stations"
+        case .radio: return "\(s.radioStations.count) stations"
+        case .infra: return s.infra.isEmpty ? "zoom in (<400 km)" : "\(s.infra.count) sites"
+        case .cables: return "\(s.cables.count) cables"
+        case .airport: return s.airportFeatures.isEmpty ? "zoom in (<12 km)" : "\(s.airportFeatures.count) surfaces"
         }
     }
 }
@@ -681,6 +864,20 @@ struct ModesSheet: View {
                 Section("Overlays") {
                     Toggle(isOn: $s.hud) { Label("Military HUD", systemImage: "scope") }
                     Toggle(isOn: $s.detection) { Label("Detection overlay", systemImage: "viewfinder") }
+                    Toggle(isOn: $s.wakes) { Label("Contact wakes", systemImage: "wind") }
+                    Toggle(isOn: $s.viewsheds) { Label("Camera viewsheds (est.)", systemImage: "camera.metering.partial") }
+                }
+                Section("ISS passes over you (approx.)") {
+                    if s.passes.isEmpty {
+                        Button("Compute passes") { s.computePasses(); if s.passes.isEmpty { s.show(s.location.coordinate == nil ? "Need your location" : "No pass ≥10° in 24h") } }
+                    } else {
+                        ForEach(s.passes) { p in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("\(Fmt.time(p.start)) → \(Fmt.time(p.end))").font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                Text(String(format: "max %.0f° · %@", p.maxElevationDeg, Fmt.rel.localizedString(for: p.start, relativeTo: Date()))).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
                 Section {
                     Button("Clear annotations") { s.clearAnnotations() }.disabled(s.annotations.isEmpty)
@@ -759,4 +956,205 @@ struct RosterSheet: View {
     }
 
     private func reload() { list = s.roster(kind: kind, limit: 60) }
+}
+
+
+// MARK: - Radio tuner
+
+struct RadioTunerSheet: View {
+    @EnvironmentObject var s: AppState
+    var body: some View { RadioTunerBody(p: s.radio) }
+}
+
+struct RadioTunerBody: View {
+    @EnvironmentObject var s: AppState
+    @ObservedObject var p: RadioPlayer
+    @State private var needle: Double = 0
+
+    private var stations: [RadioStation] { s.radioStations.sorted { $0.lon < $1.lon } }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("ANALOG TUNER").font(.system(size: 10, weight: .bold, design: .monospaced)).tracking(2).foregroundStyle(.secondary)
+                    Text(p.current?.name ?? "— drag the needle —").font(.system(size: 15, weight: .bold, design: .monospaced)).lineLimit(1)
+                    Text(p.current.map { "\($0.country) · \($0.codec ?? "")" } ?? "\(stations.count) stations, west → east").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer()
+                Button { p.toggle() } label: { Image(systemName: p.playing ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 36)) }
+                    .buttonStyle(.plain).disabled(p.current == nil)
+                Button { p.stop() } label: { Image(systemName: "stop.circle").font(.title2).foregroundStyle(.secondary) }.buttonStyle(.plain)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 6).fill(.white.opacity(0.06)).frame(height: 40)
+                    ForEach(0..<40, id: \.self) { i in
+                        Rectangle().fill(.white.opacity(i % 5 == 0 ? 0.5 : 0.2)).frame(width: 1, height: i % 5 == 0 ? 18 : 10)
+                            .offset(x: geo.size.width * Double(i) / 39, y: 0)
+                    }
+                    ForEach(stations.prefix(400)) { st in
+                        Circle().fill(Color.yellow.opacity(0.6)).frame(width: 3, height: 3)
+                            .offset(x: geo.size.width * (st.lon + 180) / 360 - 1.5, y: 14)
+                    }
+                    Rectangle().fill(.red).frame(width: 2, height: 40).offset(x: geo.size.width * needle)
+                }
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0).onChanged { v in
+                    needle = min(max(v.location.x / geo.size.width, 0), 1)
+                }.onEnded { _ in snap() })
+            }
+            .frame(height: 40)
+            HStack {
+                Text("180°W").font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+                Spacer()
+                Button("Nearest to view") { if let st = s.radioStations.min(by: { $0.coord.distance(to: s.center) < $1.coord.distance(to: s.center) }) { s.tune(st); needle = (st.lon + 180) / 360 } }
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced)).buttonStyle(.bordered)
+                Spacer()
+                Text("180°E").font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .task { if s.radioStations.isEmpty { await s.refreshRadio() }; if !s.layers.contains(.radio) { s.layers.insert(.radio) } }
+    }
+
+    private func snap() {
+        let lon = needle * 360 - 180
+        guard let st = stations.min(by: { abs($0.lon - lon) < abs($1.lon - lon) }) else { return }
+        needle = (st.lon + 180) / 360
+        s.tune(st)
+    }
+}
+
+// MARK: - Launch replay
+
+struct ReplaySheet: View {
+    @EnvironmentObject var s: AppState
+
+    var body: some View {
+        VStack(spacing: 12) {
+            if let r = s.replay {
+                let st = r.state(at: s.replayT)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("RECONSTRUCTED ESTIMATE").font(.system(size: 9, weight: .bold, design: .monospaced)).tracking(2).foregroundStyle(.pink)
+                        Text(r.launch.name).font(.system(size: 14, weight: .bold, design: .monospaced)).lineLimit(1)
+                        Text("T+\(Int(s.replayT))s · \(st.phase) · \(Int(st.altKm)) km · \(Int(st.speedKmh).formatted()) km/h")
+                            .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer()
+                    Button { s.replayToggle() } label: { Image(systemName: s.replayPlaying ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 36)) }.buttonStyle(.plain)
+                }
+                Slider(value: Binding(get: { s.replayT }, set: { s.replayPause(); s.replayT = $0 }), in: 0...LaunchReplay.duration).tint(.pink)
+                HStack {
+                    ForEach([0.25, 0.5, 1.0, 2.0, 4.0], id: \.self) { rate in
+                        Button("\(rate == 0.25 ? "¼" : rate == 0.5 ? "½" : "\(Int(rate))")×") { s.replayRate = rate }
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(Capsule().fill(s.replayRate == rate ? AnyShapeStyle(.tint) : AnyShapeStyle(.white.opacity(0.08))))
+                            .foregroundStyle(s.replayRate == rate ? Color.black : Color.primary)
+                            .buttonStyle(.plain)
+                    }
+                    Spacer()
+                    Button("End") { s.endReplay() }.font(.system(size: 11, weight: .bold, design: .monospaced)).buttonStyle(.bordered)
+                }
+            } else {
+                Text("No launch selected").foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+    }
+}
+
+// MARK: - Scenes
+
+struct ScenesSheet: View {
+    @EnvironmentObject var s: AppState
+    @State private var name = "scene"
+    @State private var importing = false
+    @State private var exported: URL?
+
+    var body: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text("SCENE RECORDER").font(.system(size: 10, weight: .bold, design: .monospaced)).tracking(2).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(s.keyframes.count) keyframes").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+            }
+            HStack(spacing: 8) {
+                Button { s.addKeyframe() } label: { Label("Add keyframe", systemImage: "camera.viewfinder") }
+                Button { if s.scenePlaying { s.stopScene() } else { s.playScene() } } label: { Label(s.scenePlaying ? "Stop" : "Play", systemImage: s.scenePlaying ? "stop.fill" : "play.fill") }
+                    .disabled(s.keyframes.isEmpty)
+                Button(role: .destructive) { s.keyframes = [] } label: { Image(systemName: "trash") }.disabled(s.keyframes.isEmpty)
+            }
+            .font(.system(size: 11, weight: .semibold, design: .monospaced)).buttonStyle(.bordered)
+            HStack(spacing: 8) {
+                TextField("scene name", text: $name).font(.system(.body, design: .monospaced)).textFieldStyle(.roundedBorder)
+                Button("Export .gev") { exported = s.exportScene(named: name); if exported != nil { s.show("Saved to Files › GodsEye › Scenes") } }
+                    .disabled(s.keyframes.isEmpty)
+                Button("Import") { importing = true }
+            }
+            .font(.system(size: 11, weight: .semibold, design: .monospaced)).buttonStyle(.bordered)
+            if let u = exported {
+                ShareLink(item: u) { Label("Share \(u.lastPathComponent)", systemImage: "square.and.arrow.up").font(.system(size: 11, weight: .semibold, design: .monospaced)) }
+                    .buttonStyle(.bordered)
+            }
+            List {
+                ForEach(Array(s.keyframes.enumerated()), id: \.element.id) { i, k in
+                    HStack {
+                        Text("\(i + 1)").font(.system(size: 11, weight: .bold, design: .monospaced)).frame(width: 22)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(Fmt.coord(k.lat, k.lon)).font(.system(size: 11, design: .monospaced))
+                            Text(String(format: "%.0f km · hdg %.0f° · pitch %.0f° · hold %.0fs", k.distance / 1000, k.heading, k.pitch, k.hold)).font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button { s.fly(to: k.coord, distance: k.distance, pitch: k.pitch, heading: k.heading) } label: { Image(systemName: "arrow.right.circle") }.buttonStyle(.plain)
+                    }
+                    .listRowBackground(Color.clear)
+                }
+                .onDelete { s.keyframes.remove(atOffsets: $0) }
+                .onMove { s.keyframes.move(fromOffsets: $0, toOffset: $1) }
+            }
+            .listStyle(.plain).scrollContentBackground(.hidden)
+            .environment(\.editMode, .constant(.active))
+        }
+        .padding(16)
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.json, .data]) { res in
+            if case .success(let url) = res { s.importScene(url) }
+        }
+    }
+}
+
+// MARK: - QR share
+
+struct QRSheet: View {
+    @EnvironmentObject var s: AppState
+    var body: some View {
+        VStack(spacing: 14) {
+            Text("SHARE THIS VIEW").font(.system(size: 10, weight: .bold, design: .monospaced)).tracking(2).foregroundStyle(.secondary)
+            if let img = QR.image(s.deepLink) {
+                Image(uiImage: img).interpolation(.none).resizable().scaledToFit().frame(width: 220, height: 220)
+                    .background(Color.white).clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            Text(s.deepLink).font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary).lineLimit(3).textSelection(.enabled)
+            ShareLink(item: s.deepLink) { Label("Share link", systemImage: "square.and.arrow.up").font(.system(size: 12, weight: .semibold, design: .monospaced)) }.buttonStyle(.bordered)
+            Text("Scan on another phone with GodsEye installed — camera, layers, sensor and target restore.").font(.caption).foregroundStyle(.tertiary).multilineTextAlignment(.center)
+        }
+        .padding(20)
+    }
+}
+
+extension Color {
+    init(hex: String) {
+        var h = hex.trimmingCharacters(in: .whitespaces)
+        if h.hasPrefix("#") { h.removeFirst() }
+        var v: UInt64 = 0
+        Scanner(string: h).scanHexInt64(&v)
+        let r, g, b: Double
+        if h.count == 6 { r = Double((v >> 16) & 0xff) / 255; g = Double((v >> 8) & 0xff) / 255; b = Double(v & 0xff) / 255 }
+        else { r = 0.5; g = 0.5; b = 1.0 }
+        self.init(red: r, green: g, blue: b)
+    }
 }

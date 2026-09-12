@@ -121,6 +121,7 @@ struct HUDView: View {
                         hud("PIT", String(format: "%02.0f°", s.pitch))
                         hud("SNS", s.sensor.title.uppercased())
                         hud("TIME", Fmt.utcFormatter.string(from: now))
+                        if !s.aiSummary.isEmpty { hud("AI", s.aiSummary) }
                     }
                     Spacer()
                     VStack(alignment: .trailing, spacing: 2) {

@@ -34,6 +34,18 @@ Target: iOS 17+. Bundle id `party.mrvek.godseye`.
 - **Voice (on-device, no key):** mic button — "take me to LAX and track the nearest aircraft", "cockpit", "switch to thermal", "turn on ships", "HUD on", "start director", "mark this as target alpha", "clear the map", "nearest camera", "reset globe".
 - Aircraft glyphs by class (heli / light / jet / heavy / drone) from ADS-B type codes.
 
+## v1.2 additions
+
+- **Layers:** Active Fires (NASA FIRMS key), Bikeshare (GBFS, 16 systems, auto-loads when zoomed in), World Radio (Radio Browser, 750 geo-tagged stations + analog tuner sheet that flies the globe to each broadcaster and streams it), Infrastructure (OSM datacenters / dams / power plants / substations via Overpass, <400 km), Submarine Cables (TeleGeography geojson, viewport-culled), Airport Detail (OSM runways / taxiways / aprons / terminals, <12 km).
+- **Tracking:** ~24h historical trace (globe.adsb.lol trace files) drawn under the live trail; Open-Meteo weather strip in the tracking bar; Lock Screen / Dynamic Island **Live Activity** for the tracked target (widget extension `GodsEyeWidgets`).
+- **Camera:** Orbit mode (auto-rotate around target/selection), contact wakes, estimated CCTV viewshed cones, **Launch replay** (reconstructed ascent, scrubbable ¼–4×).
+- **Interaction:** Measure (two taps or voice "how far is X from Y"), region outlines (Nominatim boundary polygons, voice "outline Texas"), ISS pass prediction from the on-device SGP4 + your location.
+- **Alerts:** local notifications for military-near-me, M≥threshold quakes, ISS-pass-in-10-min (foreground polling + BGAppRefresh).
+- **Share:** Scene recorder (keyframes → play / export `.gev` JSON to Files › GodsEye › Scenes / import), QR code of the deep link.
+- **AI HUD readout:** five-word view summary via your Anthropic key (Settings), regenerates when the camera settles.
+
+**Widget extension:** the IPA now contains `GodsEye.app/PlugIns/GodsEyeWidgets.appex`. Your signer must sign the appex with the same identity (most do automatically).
+
 ## Feeds (no keys)
 
 | Layer | Source |

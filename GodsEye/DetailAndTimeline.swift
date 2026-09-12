@@ -15,6 +15,7 @@ struct DetailSheet: View {
                 header
                 actions
                 if entity.kind.trackable { trackRow }
+                extraRow
                 if let img = entity.imageURL, let url = URL(string: img + "?t=\(imageTick)") { cameraImage(url) }
                 summaryBlock
                 metaGrid
@@ -86,6 +87,21 @@ struct DetailSheet: View {
                     if !s.chase { s.toggleChase() }
                 }
             }
+        }
+    }
+
+    @ViewBuilder private var extraRow: some View {
+        HStack(spacing: 8) {
+            if entity.kind == .launch, let l = s.launches.first(where: { "ll-\($0.id)" == entity.id }) {
+                ActionChip(icon: "play.rectangle", title: "Replay ascent", active: false) { s.startReplay(l) }
+            }
+            if entity.kind == .radio, let r = s.radioStations.first(where: { "radio-\($0.id)" == entity.id }) {
+                ActionChip(icon: "dot.radiowaves.left.and.right", title: s.radio.current?.id == r.id ? "Playing" : "Tune in", active: s.radio.current?.id == r.id) { s.tune(r) }
+            }
+            ActionChip(icon: "rotate.3d", title: s.orbiting ? "Orbiting" : "Orbit", active: s.orbiting) {
+                if s.orbiting { s.stopOrbit() } else { s.fly(to: entity.coord, distance: entity.viewDistance, pitch: 60); s.startOrbit() }
+            }
+            ActionChip(icon: "qrcode", title: "QR", active: false) { s.selected = nil; Task { try? await Task.sleep(nanoseconds: 400_000_000); s.showQR = true } }
         }
     }
 
