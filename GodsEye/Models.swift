@@ -845,7 +845,7 @@ struct Entity: Identifiable, Equatable {
             case .satellite: return "sparkle"
             case .launch: return "flame"
             case .camera: return "video"
-            case .place: return "mappin.and.ellipse"
+            case .place: return "building.2"
             case .fire: return "flame.circle"
             case .bike: return "bicycle"
             case .radio: return "radio"
@@ -1212,19 +1212,33 @@ struct Entity: Identifiable, Equatable {
             viewDistance: 25_000)
     }
 
-    static func place(lat: Double, lon: Double, name: String, detail: String, distance: Double) -> Entity {
+    static func place(lat: Double,
+                      lon: Double,
+                      name: String,
+                      detail: String,
+                      distance: Double,
+                      summary: String? = nil,
+                      extraMeta: [MetaRow] = []) -> Entity {
+        var metaRows: [MetaRow] = [
+            MetaRow("Latitude", String(format: "%.5f", lat)),
+            MetaRow("Longitude", String(format: "%.5f", lon))
+        ]
+        for row in extraMeta where !row.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if !metaRows.contains(where: { $0.key == row.key }) {
+                metaRows.append(row)
+            }
+        }
+        if !metaRows.contains(where: { $0.key == "Source" }) {
+            metaRows.append(MetaRow("Source", "Apple Maps geocoder"))
+        }
         Entity(
             id: "pt-\(String(format: "%.4f-%.4f", lat, lon))",
             kind: .place,
             title: name,
             subtitle: detail,
-            summary: "Tapped location · \(Fmt.coord(lat, lon))",
+            summary: summary ?? "Tapped location · \(Fmt.coord(lat, lon))",
             lat: lat, lon: lon, time: nil,
-            meta: [
-                MetaRow("Latitude", String(format: "%.5f", lat)),
-                MetaRow("Longitude", String(format: "%.5f", lon)),
-                MetaRow("Source", "Apple Maps geocoder")
-            ],
+            meta: metaRows,
             url: nil,
             viewDistance: distance)
     }
