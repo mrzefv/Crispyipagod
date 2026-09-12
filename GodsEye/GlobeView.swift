@@ -178,6 +178,9 @@ struct GlobeView: View {
                         .padding(.horizontal, 8).padding(.vertical, 5)
                         .background(.black.opacity(0.55), in: Capsule())
                         .overlay(Capsule().stroke(s.accent.opacity(0.6), lineWidth: 0.8))
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Detection overlay counts")
+                        .accessibilityValue("\(s.visibleContacts.count) aircraft, \(s.visibleSatellites.count) satellites, \(s.visibleCameras.count) cameras")
                 }
                 Spacer()
                 if s.tacticalHUD, let t = s.trackedEntity {
@@ -188,6 +191,9 @@ struct GlobeView: View {
                         .padding(.horizontal, 8).padding(.vertical, 5)
                         .background(.black.opacity(0.55), in: Capsule())
                         .overlay(Capsule().stroke(.orange.opacity(0.7), lineWidth: 0.8))
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Tracked target")
+                        .accessibilityValue("\(t.title), \(Fmt.coord(t.lat, t.lon))")
                 }
             }
             .padding(.horizontal, 12)

@@ -74,6 +74,7 @@ final class AppState: ObservableObject {
     private var geocoder = CLGeocoder()
     private var geocodeTask: Task<Void, Never>?
     private var pendingDeepLinkSelection: (sel: String?, title: String?, lat: Double?, lon: Double?)?
+    private var pendingSelectionResolveAttempts = 0
 
     init() {
         let ud = UserDefaults.standard
@@ -403,7 +404,11 @@ final class AppState: ObservableObject {
     }
 
     func updateTrackingTrail() {
-        guard let e = trackedEntity else { return }
+        guard let e = trackedEntity else {
+            trackedEntityId = nil
+            trackTrail = []
+            return
+        }
         if trackTrail.last?.distance(to: e.coord) ?? .greatestFiniteMagnitude > 30 {
             trackTrail.append(e.coord)
             if trackTrail.count > 40 { trackTrail.removeFirst(trackTrail.count - 40) }
@@ -434,6 +439,7 @@ final class AppState: ObservableObject {
     func applyMission(_ m: MissionPreset) {
         trackedEntityId = nil
         trackTrail = []
+        selected = nil
         switch m {
         case .liveContacts:
             layers = [.flights, .military, .satellites, .cameras]
@@ -495,39 +501,53 @@ final class AppState: ObservableObject {
             lat: qv("slat").flatMap(Double.init),
             lon: qv("slon").flatMap(Double.init)
         )
+        pendingSelectionResolveAttempts = 0
         resolvePendingDeepLinkSelection()
     }
 
     private func resolvePendingDeepLinkSelection() {
         guard let pending = pendingDeepLinkSelection else { return }
+        pendingSelectionResolveAttempts += 1
         if let sel = pending.sel {
             if sel.hasPrefix("ac-"),
                let c = (contacts + militaryContacts).first(where: { "ac-\($0.id)" == sel }) {
                 selected = Entity.from(c)
                 pendingDeepLinkSelection = nil
+                pendingSelectionResolveAttempts = 0
                 return
             }
             if sel.hasPrefix("sat-"),
                let sat = satellites.first(where: { "sat-\($0.id)" == sel }) {
                 selected = Entity.from(sat)
                 pendingDeepLinkSelection = nil
+                pendingSelectionResolveAttempts = 0
                 return
             }
             if sel.hasPrefix("ll-"),
                let l = launches.first(where: { "ll-\($0.id)" == sel }) {
                 selected = Entity.from(l)
                 pendingDeepLinkSelection = nil
+                pendingSelectionResolveAttempts = 0
                 return
             }
             if let cam = cameras.first(where: { $0.id == sel }) {
                 selected = Entity.from(cam)
                 pendingDeepLinkSelection = nil
+                pendingSelectionResolveAttempts = 0
                 return
             }
+            if pendingSelectionResolveAttempts >= 3,
+               let title = pending.title, let la = pending.lat, let lo = pending.lon {
+                selected = Entity.place(lat: la, lon: lo, name: title, detail: "Shared target", distance: 20_000)
+                pendingDeepLinkSelection = nil
+                pendingSelectionResolveAttempts = 0
+            }
+            return
         }
         if pending.sel == nil, let title = pending.title, let la = pending.lat, let lo = pending.lon {
             selected = Entity.place(lat: la, lon: lo, name: title, detail: "Shared target", distance: 20_000)
             pendingDeepLinkSelection = nil
+            pendingSelectionResolveAttempts = 0
         }
     }
 
