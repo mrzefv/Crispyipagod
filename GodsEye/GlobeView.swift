@@ -989,7 +989,7 @@ struct SearchSheet: View {
             guard shouldApply else { await finish(); return }
             await MainActor.run {
                 places = Array((resp?.mapItems ?? []).prefix(12))
-                parcels = Array((parcel ?? []).prefix(10))
+                parcels = Array(parcel.prefix(10))
                 searching = false
             }
         }
