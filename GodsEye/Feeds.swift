@@ -438,7 +438,7 @@ final class Feeds {
         let latKey = String(format: "%.2f", locale: posix, center.latitude)
         let lonKey = String(format: "%.2f", locale: posix, center.longitude)
         let cacheKey = "parcel-\(String(key.prefix(40)).ifEmpty("search"))-\(latKey)-\(lonKey).json"
-        let base = "https://nominatim.openstreetmap.org/search?q=\(enc)&format=jsonv2&addressdetails=1&extratags=1&accept-language=en&dedupe=1&limit=\(max(1, min(limit, 30)))"
+        let base = "https://nominatim.openstreetmap.org/search?q=\(enc)&format=jsonv2&addressdetails=1&extratags=1&dedupe=1&limit=\(max(1, min(limit, 30)))"
         let boxes: [(name: String, left: Double, right: Double)] = {
             if rawLeftLon < -180 {
                 return [
@@ -488,7 +488,8 @@ final class Feeds {
             let right = box.right
             let bottom = bottomLat
             let viewbox = String(format: "%.5f,%.5f,%.5f,%.5f", locale: posix, left, top, right, bottom)
-            let d = try await fetch(base + "&viewbox=\(viewbox)&bounded=1", cache: "\(cacheKey)-\(box.name)-\(idx)")
+            let encBox = viewbox.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlQueryAllowed.subtracting(CharacterSet(charactersIn: ","))) ?? viewbox
+            let d = try await fetch(base + "&viewbox=\(encBox)&bounded=1", cache: "\(cacheKey)-\(box.name)-\(idx)")
             guard let arr = try JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { continue }
             for r in parse(arr) where !seen.contains(r.id) {
                 seen.insert(r.id)
