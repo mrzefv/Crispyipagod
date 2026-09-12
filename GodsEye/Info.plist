@@ -16,19 +16,6 @@
 	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
-			<key>CFBundleURLName</key>
-			<string>party.mrvek.godseye</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>godseye</string>
-			</array>
-		</dict>
-	</array>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
@@ -61,6 +48,21 @@
 	</array>
 	<key>UIUserInterfaceStyle</key>
 	<string>Dark</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>party.mrvek.godseye</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>godseye</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Voice commands: navigate, track, and switch sensors hands-free.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Voice commands are recognized on-device when available.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>GodsEye shows your position on the live globe.</string>
 	<key>NSAppTransportSecurity</key>

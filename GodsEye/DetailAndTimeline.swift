@@ -1,41 +1,40 @@
 import SwiftUI
 import MapKit
 
-// MARK: - Location detail sheet
+// MARK: - Detail sheet
 
 struct DetailSheet: View {
     @EnvironmentObject var s: AppState
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     let entity: Entity
+    @State private var imageTick = 0
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 header
                 actions
+                if entity.kind.trackable { trackRow }
+                if let img = entity.imageURL, let url = URL(string: img + "?t=\(imageTick)") { cameraImage(url) }
                 summaryBlock
                 metaGrid
-                if let u = entity.url, let url = URL(string: u) {
-                    Button { openURL(url) } label: {
-                        Label("Open source record", systemImage: "arrow.up.right.square")
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                HStack(spacing: 8) {
+                    if let u = entity.url, let url = URL(string: u) {
+                        Button { openURL(url) } label: { Label("Source", systemImage: "arrow.up.right.square") }
                     }
-                    .buttonStyle(.bordered)
+                    Button {
+                        let item = MKMapItem(placemark: MKPlacemark(coordinate: entity.coord))
+                        item.name = entity.title
+                        item.openInMaps(launchOptions: [MKLaunchOptionsMapTypeKey: MKMapType.satellite.rawValue])
+                    } label: { Label("Apple Maps", systemImage: "map") }
+                    if entity.kind != .camera {
+                        Button { s.handoffToNearestCamera(from: entity) } label: { Label("Nearest cam", systemImage: "video") }
+                    }
                 }
-                Button {
-                    let item = MKMapItem(placemark: MKPlacemark(coordinate: entity.coord))
-                    item.name = entity.title
-                    item.openInMaps(launchOptions: [MKLaunchOptionsMapTypeKey: MKMapType.satellite.rawValue])
-                } label: {
-                    Label("Open in Apple Maps", systemImage: "map")
-                        .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                }
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .buttonStyle(.bordered)
                 Text("Public-source data. May be delayed, modeled, or wrong. Not for navigation or safety-critical use.")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .padding(.top, 8)
+                    .font(.system(size: 10, design: .monospaced)).foregroundStyle(.tertiary).padding(.top, 8)
             }
             .padding(20)
         }
@@ -49,21 +48,10 @@ struct DetailSheet: View {
             }
             .frame(width: 50, height: 50)
             VStack(alignment: .leading, spacing: 4) {
-                Text(entity.kind.label)
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .tracking(2)
-                    .foregroundStyle(entity.kind.color)
-                Text(entity.title)
-                    .font(.system(size: 20, weight: .bold, design: .monospaced))
-                    .lineLimit(2)
-                Text(entity.subtitle)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                Text(Fmt.coord(entity.lat, entity.lon))
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 2)
+                Text(entity.kind.label).font(.system(size: 10, weight: .bold, design: .monospaced)).tracking(2).foregroundStyle(entity.kind.color)
+                Text(entity.title).font(.system(size: 19, weight: .bold, design: .monospaced)).lineLimit(2)
+                Text(entity.subtitle).font(.system(size: 13)).foregroundStyle(.secondary).lineLimit(2)
+                Text(Fmt.coord(entity.lat, entity.lon)).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).padding(.top, 2)
             }
             Spacer(minLength: 0)
         }
@@ -74,22 +62,50 @@ struct DetailSheet: View {
             ActionChip(icon: s.isBookmarked(entity) ? "bookmark.fill" : "bookmark",
                        title: s.isBookmarked(entity) ? "Saved" : "Save",
                        active: s.isBookmarked(entity)) { s.toggleBookmark(entity) }
-            ActionChip(icon: s.trackedEntityId == entity.id ? "scope.circle.fill" : "scope",
-                       title: s.trackedEntityId == entity.id ? "Tracking" : "Track",
-                       active: s.trackedEntityId == entity.id) { s.toggleTracking(entity) }
-            ActionChip(icon: "clock.arrow.circlepath", title: "Timeline", active: false) {
-                s.openTimeline(at: entity.time)
-            }
-            ShareLink(item: [entity.shareText, s.shareURL(for: entity)?.absoluteString].compactMap { $0 }.joined(separator: "\n\n")) {
+            ActionChip(icon: "clock.arrow.circlepath", title: "Timeline", active: false) { s.openTimeline(at: entity.time) }
+            ShareLink(item: entity.shareText + "\n\nOpen in GodsEye: " + s.deepLink) {
                 HStack(spacing: 6) {
                     Image(systemName: "square.and.arrow.up")
                     Text("Share").font(.system(size: 12, weight: .semibold, design: .monospaced))
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
+                .frame(maxWidth: .infinity).padding(.vertical, 10)
                 .background(RoundedRectangle(cornerRadius: 10).fill(.white.opacity(0.08)))
             }
             .buttonStyle(.plain)
+        }
+    }
+
+    private var trackRow: some View {
+        HStack(spacing: 8) {
+            ActionChip(icon: "scope", title: s.trackedID == entity.id ? "Tracking" : "Track", active: s.trackedID == entity.id) {
+                if s.trackedID == entity.id { s.stopTracking() } else { s.track(entity) }
+            }
+            if entity.kind == .aircraft || entity.kind == .military || entity.kind == .ship {
+                ActionChip(icon: "airplane.departure", title: "Cockpit", active: s.trackedID == entity.id && s.chase) {
+                    if s.trackedID != entity.id { s.track(entity) }
+                    if !s.chase { s.toggleChase() }
+                }
+            }
+        }
+    }
+
+    private func cameraImage(_ url: URL) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("LIVE STILL").font(.system(size: 10, weight: .bold, design: .monospaced)).tracking(2).foregroundStyle(.secondary)
+                Spacer()
+                Button { imageTick += 1 } label: { Image(systemName: "arrow.clockwise").font(.caption) }
+            }
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let img): img.resizable().scaledToFit()
+                case .failure: Label("Camera offline", systemImage: "video.slash").frame(maxWidth: .infinity).padding(30)
+                default: ProgressView().frame(maxWidth: .infinity).padding(40)
+                }
+            }
+            .background(Color.black.opacity(0.4))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .modifier(SensorFilter(mode: s.sensor))
         }
     }
 
@@ -99,8 +115,7 @@ struct DetailSheet: View {
             Text(entity.summary).font(.system(size: 14))
             if let t = entity.time {
                 Text("\(Fmt.time(t)) · \(Fmt.rel.localizedString(for: t, relativeTo: Date()))")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
             }
         }
     }
@@ -114,8 +129,7 @@ struct DetailSheet: View {
                         Text(row.key).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
                         Spacer()
                         Text(row.value).font(.system(size: 12, weight: .semibold, design: .monospaced))
-                            .multilineTextAlignment(.trailing)
-                            .textSelection(.enabled)
+                            .multilineTextAlignment(.trailing).textSelection(.enabled)
                     }
                     .padding(.vertical, 7)
                     Divider().opacity(0.4)
@@ -137,10 +151,9 @@ struct ActionChip: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: icon)
-                Text(title).font(.system(size: 12, weight: .semibold, design: .monospaced))
+                Text(title).font(.system(size: 12, weight: .semibold, design: .monospaced)).lineLimit(1).minimumScaleFactor(0.8)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity).padding(.vertical, 10)
             .foregroundStyle(active ? Color.black : Color.primary)
             .background(RoundedRectangle(cornerRadius: 10).fill(active ? AnyShapeStyle(.tint) : AnyShapeStyle(.white.opacity(0.08))))
         }
@@ -167,13 +180,9 @@ struct TimelineView: View {
                         .foregroundStyle(s.isLive ? s.accent : .orange)
                     Text(Fmt.time(s.effectiveTime))
                         .font(.system(size: 18, weight: .bold, design: .monospaced))
-                        .contentTransition(.numericText())
-                        .animation(.linear(duration: 0.15), value: s.effectiveTime)
                 }
                 Spacer()
-                Button {
-                    s.goLive()
-                } label: {
+                Button { s.goLive() } label: {
                     Text("GO LIVE")
                         .font(.system(size: 11, weight: .bold, design: .monospaced))
                         .padding(.horizontal, 10).padding(.vertical, 6)
@@ -181,26 +190,20 @@ struct TimelineView: View {
                         .foregroundStyle(s.isLive ? Color.secondary : Color.black)
                 }
                 .buttonStyle(.plain)
-                Button { dismiss() } label: {
-                    Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
+                Button { dismiss() } label: { Image(systemName: "xmark.circle.fill").font(.title3).foregroundStyle(.secondary) }
+                    .buttonStyle(.plain)
             }
 
             scrubber
 
             HStack(spacing: 14) {
                 Button { s.jump(forward: false) } label: { Image(systemName: "backward.end.fill") }
-                Button { s.togglePlay() } label: {
-                    Image(systemName: s.playing ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 40))
-                }
+                Button { s.togglePlay() } label: { Image(systemName: s.playing ? "pause.circle.fill" : "play.circle.fill").font(.system(size: 40)) }
                 Button { s.jump(forward: true) } label: { Image(systemName: "forward.end.fill") }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text("\(s.timelineEvents.count) EVENTS")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(.secondary)
-                    Text("\(s.visibleQuakes.count) EQ SHOWN")
-                        .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                    Text("\(s.timelineEvents.count) EVENTS").font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundStyle(.secondary)
+                    Text("\(s.visibleQuakes.count) EQ SHOWN").font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
                 }
             }
             .font(.title2)
@@ -215,8 +218,7 @@ struct TimelineView: View {
                         }
                         Spacer()
                         if let t = e.time {
-                            Text(Fmt.rel.localizedString(for: t, relativeTo: Date()))
-                                .font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
+                            Text(Fmt.rel.localizedString(for: t, relativeTo: Date())).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary)
                         }
                         Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
                     }
@@ -225,7 +227,6 @@ struct TimelineView: View {
                 }
                 .buttonStyle(.plain)
             }
-
             Spacer(minLength: 0)
         }
         .padding(16)
@@ -237,7 +238,6 @@ struct TimelineView: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule().fill(.white.opacity(0.08)).frame(height: 6).offset(y: 10)
-                    // "now" marker
                     Rectangle().fill(.white.opacity(0.35)).frame(width: 1, height: 26)
                         .offset(x: geo.size.width * s.fraction(of: Date()))
                     ForEach(s.timelineEvents) { e in
@@ -247,9 +247,7 @@ struct TimelineView: View {
                             .offset(x: geo.size.width * s.fraction(of: e.time ?? Date()) - 3, y: 10.5)
                             .opacity(e.id == s.focusedEvent?.id ? 1 : 0.7)
                     }
-                    Slider(value: frac, in: 0...1)
-                        .tint(s.isLive ? s.accent : .orange)
-                        .frame(height: 26)
+                    Slider(value: frac, in: 0...1).tint(s.isLive ? s.accent : .orange).frame(height: 26)
                 }
             }
             .frame(height: 26)
@@ -257,8 +255,6 @@ struct TimelineView: View {
                 Text("-24H").font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
                 Spacer()
                 Text("NOW").font(.system(size: 9, weight: .bold, design: .monospaced)).foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .offset(x: 0)
                 Spacer()
                 Text("+72H").font(.system(size: 9, design: .monospaced)).foregroundStyle(.secondary)
             }

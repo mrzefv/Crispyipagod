@@ -5,37 +5,99 @@ import SwiftUI
 // MARK: - Layers
 
 enum Layer: String, CaseIterable, Identifiable, Codable {
-    case flights, military, satellites, quakes, launches, cameras
+    case flights, military, ships, satellites, quakes, launches, cctv, traffic
     var id: String { rawValue }
 
     var title: String {
         switch self {
         case .flights: return "Live Flights"
         case .military: return "Military Traffic"
-        case .satellites: return "Satellites (ISS)"
+        case .ships: return "Live Vessels (AIS)"
+        case .satellites: return "Satellites"
         case .quakes: return "Earthquakes (24h)"
         case .launches: return "Space Missions"
-        case .cameras: return "Public Cameras"
+        case .cctv: return "Public CCTV (London)"
+        case .traffic: return "Traffic Flow"
         }
     }
     var icon: String {
         switch self {
         case .flights: return "airplane"
         case .military: return "shield.lefthalf.filled"
+        case .ships: return "ferry"
         case .satellites: return "sparkle"
         case .quakes: return "waveform.path.ecg"
         case .launches: return "flame"
-        case .cameras: return "video"
+        case .cctv: return "video"
+        case .traffic: return "car.2"
         }
     }
     var source: String {
         switch self {
         case .flights: return "adsb.lol"
         case .military: return "adsb.lol /mil"
-        case .satellites: return "wheretheiss.at"
+        case .ships: return "AISStream (key)"
+        case .satellites: return "CelesTrak GP · SGP4"
         case .quakes: return "USGS"
         case .launches: return "Launch Library 2"
-        case .cameras: return "Public city camera portals"
+        case .cctv: return "TfL JamCams"
+        case .traffic: return "Apple Maps"
+        }
+    }
+    var needsKey: Bool { self == .ships }
+}
+
+// MARK: - Sensor modes / missions
+
+enum SensorMode: String, CaseIterable, Identifiable, Codable {
+    case normal, nvg, flir, crt, noir, snow
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .normal: return "Normal"
+        case .nvg: return "NVG"
+        case .flir: return "FLIR"
+        case .crt: return "CRT"
+        case .noir: return "Noir"
+        case .snow: return "Snow"
+        }
+    }
+    var key: String { "\(SensorMode.allCases.firstIndex(of: self)! + 1)" }
+}
+
+enum Mission: String, CaseIterable, Identifiable {
+    case liveContacts, space, environmental, london
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .liveContacts: return "Live Contacts"
+        case .space: return "Space Missions"
+        case .environmental: return "Environmental"
+        case .london: return "London Watch"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .liveContacts: return "airplane.circle"
+        case .space: return "sparkles"
+        case .environmental: return "globe.europe.africa"
+        case .london: return "video.circle"
+        }
+    }
+    var layers: Set<Layer> {
+        switch self {
+        case .liveContacts: return [.flights, .military, .ships]
+        case .space: return [.satellites, .launches]
+        case .environmental: return [.quakes, .launches]
+        case .london: return [.cctv, .traffic, .flights]
+        }
+    }
+    var camera: (lat: Double, lon: Double, distance: Double, pitch: Double) {
+        switch self {
+        case .liveContacts: return (40.64, -73.78, 900_000, 45)
+        case .space: return (20, -30, 26_000_000, 0)
+        case .environmental: return (10, 140, 22_000_000, 0)
+        case .london: return (51.505, -0.09, 22_000, 55)
         }
     }
 }
@@ -76,6 +138,25 @@ struct Contact: Identifiable, Decodable, Equatable {
 
     var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
     var displayName: String { callsign.isEmpty ? id.uppercased() : callsign }
+
+    enum AircraftClass { case heli, light, jet, heavy, drone }
+    var aircraftClass: AircraftClass {
+        let t = (type ?? "").uppercased()
+        if ["R22","R44","R66","EC35","EC45","EC30","EC55","EC75","H60","UH1","AS50","AS55","AS65","A139","A109","B06","B407","B412","B429","S76","S92","H500","H47","H64","MI8","MI17","B105","EC20","A169","H160","B222","B230","B430"].contains(t) || t.hasPrefix("EC1") || t.hasPrefix("AS3") { return .heli }
+        if ["MQ9","RQ4","MQ4","MQ1","Q4","RQ1"].contains(t) { return .drone }
+        if ["B744","B748","B77W","B77L","B772","B773","B788","B789","B78X","A388","A332","A333","A339","A342","A343","A345","A346","A359","A35K","B763","B762","B764","MD11","C17","C5M","A124","A225","KC10","K35R","E3TF","E3CF","B52","RC135","C130","C30J","A400","IL76","AN12","B742","B741","B743","DC10"].contains(t) { return .heavy }
+        if t.hasPrefix("C1") || t.hasPrefix("C2") || t.hasPrefix("P28") || t.hasPrefix("PA") || t.hasPrefix("SR2") || t.hasPrefix("DA4") || t.hasPrefix("DA2") || t.hasPrefix("BE") || t.hasPrefix("M20") || t.hasPrefix("RV") || t.hasPrefix("DV20") || t.hasPrefix("AC1") || t.hasPrefix("GLID") || t == "ULAC" || t == "GYRO" { return .light }
+        return .jet
+    }
+    var glyph: String {
+        switch aircraftClass {
+        case .heli: return "fanblades.fill"
+        case .light: return "paperplane.fill"
+        case .jet: return "airplane"
+        case .heavy: return "airplane"
+        case .drone: return "arrowtriangle.up.fill"
+        }
+    }
 
     enum Keys: String, CodingKey { case hex, flight, lat, lon, alt_baro, gs, track, t, r, squawk, dbFlags }
 
@@ -164,28 +245,7 @@ struct SatPos: Identifiable, Equatable {
     let altKm: Double
     let velocityKmh: Double
     let time: Date
-    let source: String
     var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
-    var isISS: Bool { id == "25544" }
-}
-
-struct CameraFeed: Identifiable, Equatable, Codable {
-    let id: String
-    let name: String
-    let city: String
-    let lat: Double
-    let lon: Double
-    let provider: String
-    let url: String
-    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
-
-    static let defaults: [CameraFeed] = [
-        .init(id: "cam-nyc-times", name: "Times Sq", city: "New York", lat: 40.7580, lon: -73.9855, provider: "EarthCam", url: "https://www.earthcam.com/usa/newyork/timessquare/"),
-        .init(id: "cam-london-traf", name: "Trafalgar Sq", city: "London", lat: 51.5080, lon: -0.1281, provider: "Trafalgar webcam", url: "https://www.earthcam.com/world/england/london/trafalgarsquare/"),
-        .init(id: "cam-austin-6th", name: "6th Street", city: "Austin", lat: 30.2676, lon: -97.7395, provider: "Austin cam", url: "https://www.fox7austin.com/weather/cameras"),
-        .init(id: "cam-tokyo-shibuya", name: "Shibuya Crossing", city: "Tokyo", lat: 35.6595, lon: 139.7005, provider: "Shibuya cam", url: "https://www.youtube.com/results?search_query=shibuya+live+camera"),
-        .init(id: "cam-sf-bay", name: "Bay Bridge", city: "San Francisco", lat: 37.7983, lon: -122.3778, provider: "ABC7 cam", url: "https://abc7news.com/traffic/")
-    ]
 }
 
 // MARK: - Launches (Launch Library 2)
@@ -239,6 +299,111 @@ struct Launch: Identifiable, Equatable {
     }
 }
 
+// MARK: - Ships (AISStream)
+
+struct Ship: Identifiable, Equatable {
+    let id: String          // MMSI
+    var name: String
+    var lat: Double
+    var lon: Double
+    var sogKt: Double
+    var cog: Double
+    var heading: Double
+    var navStatus: Int
+    var seenAt: Date
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+    var displayName: String { name.trimmingCharacters(in: .whitespaces).isEmpty ? "MMSI \(id)" : name.trimmingCharacters(in: .whitespaces) }
+    var statusText: String {
+        switch navStatus {
+        case 0: return "Under way (engine)"
+        case 1: return "At anchor"
+        case 2: return "Not under command"
+        case 3: return "Restricted manoeuvrability"
+        case 5: return "Moored"
+        case 7: return "Fishing"
+        case 8: return "Under way (sailing)"
+        default: return "Status \(navStatus)"
+        }
+    }
+}
+
+// MARK: - Satellites (CelesTrak GP + SGP4)
+
+struct Satellite: Identifiable, Equatable {
+    enum Class: String { case station, starlink, weather, gps, other
+        var color: Color {
+            switch self {
+            case .station: return .cyan
+            case .starlink: return Color(red: 0.75, green: 0.75, blue: 1.0)
+            case .weather: return .mint
+            case .gps: return .yellow
+            case .other: return .white
+            }
+        }
+        var label: String {
+            switch self {
+            case .station: return "STATION"
+            case .starlink: return "STARLINK"
+            case .weather: return "WEATHER"
+            case .gps: return "NAV"
+            case .other: return "OTHER"
+            }
+        }
+    }
+    let id: String
+    let name: String
+    let cls: Class
+    var lat: Double
+    var lon: Double
+    var altKm: Double
+    var speedKmh: Double
+    var periodMin: Double
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+
+    static func classify(_ name: String) -> Class {
+        let n = name.uppercased()
+        if n.contains("ISS") || n.contains("TIANGONG") || n.contains("CSS") || n.contains("ZARYA") { return .station }
+        if n.contains("STARLINK") { return .starlink }
+        if n.contains("NOAA") || n.contains("METOP") || n.contains("GOES") || n.contains("METEOR") || n.contains("FENGYUN") || n.contains("TERRA") || n.contains("AQUA") || n.contains("SUOMI") { return .weather }
+        if n.contains("NAVSTAR") || n.contains("GPS") || n.contains("GLONASS") || n.contains("GALILEO") || n.contains("BEIDOU") { return .gps }
+        return .other
+    }
+}
+
+// MARK: - CCTV (TfL JamCams)
+
+struct TfLPlace: Decodable {
+    let id: String
+    let commonName: String
+    let lat: Double
+    let lon: Double
+    let additionalProperties: [Prop]
+    struct Prop: Decodable { let key: String; let value: String }
+}
+
+struct Camera: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let lat: Double
+    let lon: Double
+    let imageURL: String
+    let videoURL: String?
+    let available: Bool
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+
+    init?(_ p: TfLPlace) {
+        let props = Dictionary(p.additionalProperties.map { ($0.key, $0.value) }, uniquingKeysWith: { a, _ in a })
+        guard let img = props["imageUrl"], !img.isEmpty else { return nil }
+        id = p.id
+        name = p.commonName
+        lat = p.lat
+        lon = p.lon
+        imageURL = img
+        videoURL = props["videoUrl"]
+        available = (props["available"] ?? "true").lowercased() == "true"
+    }
+}
+
 // MARK: - Unified entity (what the detail sheet renders)
 
 struct MetaRow: Identifiable, Equatable {
@@ -250,15 +415,16 @@ struct MetaRow: Identifiable, Equatable {
 
 struct Entity: Identifiable, Equatable {
     enum Kind: String, Codable, CaseIterable {
-        case aircraft, military, earthquake, satellite, launch, camera, place
+        case aircraft, military, ship, earthquake, satellite, launch, camera, place
         var icon: String {
             switch self {
             case .aircraft: return "airplane"
             case .military: return "shield.lefthalf.filled"
+            case .ship: return "ferry"
             case .earthquake: return "waveform.path.ecg"
             case .satellite: return "sparkle"
             case .launch: return "flame"
-            case .camera: return "video.fill"
+            case .camera: return "video"
             case .place: return "mappin.and.ellipse"
             }
         }
@@ -266,6 +432,7 @@ struct Entity: Identifiable, Equatable {
             switch self {
             case .aircraft: return "AIRCRAFT"
             case .military: return "MILITARY"
+            case .ship: return "VESSEL"
             case .earthquake: return "SEISMIC"
             case .satellite: return "ORBITAL"
             case .launch: return "LAUNCH"
@@ -277,13 +444,15 @@ struct Entity: Identifiable, Equatable {
             switch self {
             case .aircraft: return .green
             case .military: return .orange
+            case .ship: return .blue
             case .earthquake: return .red
             case .satellite: return .cyan
             case .launch: return .pink
-            case .camera: return .mint
+            case .camera: return .purple
             case .place: return .white
             }
         }
+        var trackable: Bool { self == .aircraft || self == .military || self == .ship || self == .satellite }
     }
 
     let id: String
@@ -297,6 +466,8 @@ struct Entity: Identifiable, Equatable {
     let meta: [MetaRow]
     let url: String?
     let viewDistance: Double
+    var imageURL: String? = nil
+    var heading: Double = 0
 
     var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
     var shareText: String {
@@ -326,7 +497,69 @@ struct Entity: Identifiable, Equatable {
                 MetaRow("Source", "adsb.lol")
             ],
             url: "https://globe.adsb.lol/?icao=\(c.id)",
-            viewDistance: 60_000)
+            viewDistance: 60_000,
+            imageURL: nil,
+            heading: c.track)
+    }
+
+    static func from(_ v: Ship) -> Entity {
+        Entity(
+            id: "sh-\(v.id)",
+            kind: .ship,
+            title: v.displayName,
+            subtitle: v.statusText,
+            summary: "\(String(format: "%.1f", v.sogKt)) kt · COG \(Int(v.cog))° · fix \(Fmt.rel.localizedString(for: v.seenAt, relativeTo: Date()))",
+            lat: v.lat, lon: v.lon, time: v.seenAt,
+            meta: [
+                MetaRow("MMSI", v.id),
+                MetaRow("Speed", String(format: "%.1f kt", v.sogKt)),
+                MetaRow("Course", "\(Int(v.cog))°"),
+                MetaRow("Heading", v.heading >= 511 ? "—" : "\(Int(v.heading))°"),
+                MetaRow("Nav status", v.statusText),
+                MetaRow("Source", "AISStream")
+            ],
+            url: "https://www.marinetraffic.com/en/ais/details/ships/mmsi:\(v.id)",
+            viewDistance: 20_000,
+            imageURL: nil,
+            heading: v.cog)
+    }
+
+    static func from(_ sat: Satellite) -> Entity {
+        Entity(
+            id: "sat-\(sat.id)",
+            kind: .satellite,
+            title: sat.name,
+            subtitle: "\(sat.cls.label) · period \(Int(sat.periodMin)) min",
+            summary: "Altitude \(Int(sat.altKm)) km · \(Int(sat.speedKmh).formatted()) km/h · SGP4 propagated",
+            lat: sat.lat, lon: sat.lon, time: Date(),
+            meta: [
+                MetaRow("NORAD", sat.id),
+                MetaRow("Class", sat.cls.label),
+                MetaRow("Altitude", String(format: "%.1f km", sat.altKm)),
+                MetaRow("Velocity", "\(Int(sat.speedKmh).formatted()) km/h"),
+                MetaRow("Period", String(format: "%.1f min", sat.periodMin)),
+                MetaRow("Source", "CelesTrak GP")
+            ],
+            url: "https://celestrak.org/NORAD/elements/gp.php?CATNR=\(sat.id)",
+            viewDistance: 3_000_000)
+    }
+
+    static func from(_ cam: Camera) -> Entity {
+        Entity(
+            id: "cam-\(cam.id)",
+            kind: .camera,
+            title: cam.name,
+            subtitle: cam.available ? "TfL JamCam · live still" : "TfL JamCam · offline",
+            summary: "Public traffic camera. Image refreshes every few minutes; position is published, view direction is estimated.",
+            lat: cam.lat, lon: cam.lon, time: nil,
+            meta: [
+                MetaRow("Camera ID", cam.id),
+                MetaRow("Available", cam.available ? "yes" : "no"),
+                MetaRow("Source", "TfL Unified API")
+            ],
+            url: cam.videoURL ?? cam.imageURL,
+            viewDistance: 1_200,
+            imageURL: cam.imageURL)
     }
 
     static func from(_ q: Quake) -> Entity {
@@ -362,7 +595,7 @@ struct Entity: Identifiable, Equatable {
                 MetaRow("Altitude", String(format: "%.1f km", s.altKm)),
                 MetaRow("Velocity", "\(Int(s.velocityKmh).formatted()) km/h"),
                 MetaRow("Fix time", Fmt.time(s.time)),
-                MetaRow("Source", s.source)
+                MetaRow("Source", "wheretheiss.at")
             ],
             url: "https://wheretheiss.at",
             viewDistance: 3_000_000)
@@ -407,59 +640,6 @@ struct Entity: Identifiable, Equatable {
             ],
             url: nil,
             viewDistance: distance)
-    }
-
-    static func from(_ cam: CameraFeed) -> Entity {
-        Entity(
-            id: cam.id,
-            kind: .camera,
-            title: cam.name,
-            subtitle: cam.city,
-            summary: "Public camera overlay · \(cam.provider)",
-            lat: cam.lat,
-            lon: cam.lon,
-            time: nil,
-            meta: [
-                MetaRow("City", cam.city),
-                MetaRow("Provider", cam.provider),
-                MetaRow("Source", "Public camera directory")
-            ],
-            url: cam.url,
-            viewDistance: 35_000
-        )
-    }
-}
-
-enum SensorStyle: String, CaseIterable, Identifiable, Codable {
-    case normal, nvg, flir, crt, noir
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .normal: return "Normal"
-        case .nvg: return "NVG"
-        case .flir: return "FLIR"
-        case .crt: return "CRT"
-        case .noir: return "Noir"
-        }
-    }
-}
-
-enum MissionPreset: String, CaseIterable, Identifiable {
-    case liveContacts, space, environmental
-    var id: String { rawValue }
-    var title: String {
-        switch self {
-        case .liveContacts: return "Live Contacts"
-        case .space: return "Space Mission"
-        case .environmental: return "Environmental"
-        }
-    }
-    var icon: String {
-        switch self {
-        case .liveContacts: return "airplane.circle"
-        case .space: return "sparkles"
-        case .environmental: return "leaf"
-        }
     }
 }
 

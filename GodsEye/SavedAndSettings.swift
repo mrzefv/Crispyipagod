@@ -12,7 +12,7 @@ struct SavedView: View {
                     ContentUnavailableView {
                         Label("Nothing saved", systemImage: "bookmark")
                     } description: {
-                        Text("Tap any contact, event, or location on the globe and hit Save.")
+                        Text("Tap any contact, event, camera, or location on the globe and hit Save.")
                     }
                 } else {
                     List {
@@ -43,19 +43,14 @@ struct SavedView: View {
             }
             .background(Color.black.ignoresSafeArea())
             .navigationTitle("Saved")
-            .toolbar {
-                if !s.bookmarks.isEmpty { EditButton() }
-            }
+            .toolbar { if !s.bookmarks.isEmpty { EditButton() } }
         }
     }
 
     private func open(_ b: Bookmark) {
         let e = s.entity(forBookmark: b)
         s.tab = 0
-        Task {
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            s.select(e)
-        }
+        Task { try? await Task.sleep(nanoseconds: 250_000_000); s.select(e) }
     }
 }
 
@@ -64,6 +59,7 @@ struct SavedView: View {
 struct SettingsView: View {
     @EnvironmentObject var s: AppState
     @State private var confirmClear = false
+    @State private var keyDraft = ""
 
     var body: some View {
         NavigationStack {
@@ -84,34 +80,41 @@ struct SettingsView: View {
                         Text("Hybrid (imagery + roads)").tag("hybrid")
                         Text("Standard dark").tag("standard")
                     }
-                    .pickerStyle(.inline)
-                    .labelsHidden()
-                    Toggle("Show live traffic", isOn: $s.showTraffic)
-                } header: {
-                    Text("Map style")
-                } footer: {
-                    Text("Imagery uses Apple's satellite tiles with 3D terrain where available.")
+                    .pickerStyle(.inline).labelsHidden()
+                } header: { Text("Map style") } footer: {
+                    Text("Traffic layer switches imagery to hybrid automatically so flow colors can render.")
                 }
 
-                Section("Sensor / HUD") {
-                    Picker("Sensor style", selection: $s.sensorStyleRaw) {
-                        ForEach(SensorStyle.allCases) { style in
-                            Text(style.title).tag(style.rawValue)
-                        }
+                Section {
+                    Picker("Sensor", selection: $s.sensor) {
+                        ForEach(SensorMode.allCases) { m in Text(m.title).tag(m) }
                     }
-                    Toggle("Detection overlay", isOn: $s.detectionOverlay)
-                    Toggle("Military HUD", isOn: $s.tacticalHUD)
+                    Toggle("Military HUD", isOn: $s.hud)
+                    Toggle("Detection overlay", isOn: $s.detection)
+                } header: { Text("Sensor & overlays") }
+
+                Section {
+                    SecureField("AISStream API key", text: $keyDraft)
+                        .font(.system(.body, design: .monospaced))
+                        .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    HStack {
+                        Button("Save key") { s.aisKey = keyDraft.trimmingCharacters(in: .whitespacesAndNewlines) }
+                            .disabled(keyDraft.isEmpty)
+                        Spacer()
+                        if !s.aisKey.isEmpty { Button("Remove", role: .destructive) { s.aisKey = ""; keyDraft = "" } }
+                    }
+                    LabeledContent("Status", value: s.aisKey.isEmpty ? "no key" : s.aisStatus)
+                } header: { Text("Power up — Live Vessels") } footer: {
+                    Text("Free key at aisstream.io. Stored on-device only; the socket connects straight from your phone to AISStream.")
                 }
 
                 Section {
                     Toggle("Performance mode", isOn: $s.performanceMode)
                         .onChange(of: s.performanceMode) { _, _ in s.startPolling() }
-                } header: {
-                    Text("Performance")
-                } footer: {
+                } header: { Text("Performance") } footer: {
                     Text(s.performanceMode
-                         ? "Flat terrain · up to 250 contacts when zoomed in · 30s polling. Recommended on iPhone XS-era devices."
-                         : "3D terrain · up to 600 contacts when zoomed in · 15s polling. Heavier on older devices.")
+                         ? "Flat terrain · up to 250 aircraft / 200 ships when zoomed in · 30s polling · 5s orbit ticks. Recommended on iPhone XS-era devices."
+                         : "3D terrain · up to 600 aircraft / 400 ships · 15s polling · 3s orbit ticks. Heavier on older devices.")
                 }
 
                 Section {
@@ -123,44 +126,48 @@ struct SettingsView: View {
                         .confirmationDialog("Delete all cached feed data?", isPresented: $confirmClear, titleVisibility: .visible) {
                             Button("Clear cache", role: .destructive) { s.clearCache() }
                         }
-                } header: {
-                    Text("Cache / Offline")
-                } footer: {
-                    Text("Offline mode serves the last good payload of every feed and stops network polling. Turn it off to resume live data.")
+                } header: { Text("Cache / Offline") } footer: {
+                    Text("Offline mode serves the last good payload of every feed (including orbital elements) and stops polling.")
                 }
 
                 Section {
-                    LabeledContent("Default layers", value: s.layers.map(\.title).sorted().joined(separator: ", "))
                     Button("Reset layers to default") { s.layers = [.flights, .quakes, .satellites, .launches] }
                     Button("Delete all bookmarks", role: .destructive) { s.bookmarks = [] }
-                } header: {
-                    Text("Data")
+                    Button("Clear annotations") { s.clearAnnotations() }
+                } header: { Text("Data") }
+
+                Section("Voice commands") {
+                    ForEach(["“Take me to LAX and track the nearest aircraft”",
+                             "“Track nearest ship” · “Cockpit” · “Stop tracking”",
+                             "“Switch to night vision” · “Thermal” · “Normal view”",
+                             "“Turn on satellites” · “Hide earthquakes”",
+                             "“HUD on” · “Detection off” · “Start director”",
+                             "“Mark this as target alpha” · “Clear the map”",
+                             "“Nearest camera” · “Reset globe” · “Timeline”"], id: \.self) { t in
+                        Text(t).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Sources") {
-                    ForEach(Layer.allCases) { l in
-                        LabeledContent(l.title, value: l.source)
-                    }
-                    LabeledContent("Basemap", value: "Apple Maps")
-                    LabeledContent("Geocoding", value: "Apple Maps")
+                    ForEach(Layer.allCases) { l in LabeledContent(l.title, value: l.source) }
+                    LabeledContent("Basemap / geocoding", value: "Apple Maps")
+                    LabeledContent("Speech", value: "On-device (Apple)")
                 }
 
                 Section {
-                    LabeledContent("App", value: "GodsEye 1.0.1")
+                    LabeledContent("App", value: "GodsEye 1.1.0")
                     LabeledContent("Build", value: "MRzefv")
+                    LabeledContent("Deep links", value: "godseye://view?…")
                     LabeledContent("Inspired by", value: "gods-eye-view (MIT)")
                     Text("Exploratory visualization of public data. Feeds may be delayed, incomplete, or wrong. Not for flight, maritime, emergency, or other safety-critical use. No people tracking — assets, events, and infrastructure only.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } header: {
-                    Text("About")
-                }
+                        .font(.caption).foregroundStyle(.secondary)
+                } header: { Text("About") }
             }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(Color.black.ignoresSafeArea())
             .navigationTitle("Settings")
-            .onAppear { s.cacheBytes = FeedCache.size() }
+            .onAppear { s.cacheBytes = FeedCache.size(); keyDraft = s.aisKey }
         }
     }
 }
