@@ -582,13 +582,16 @@ final class AppState: ObservableObject {
 
     func applyPendingSharedView() {
         guard let state = pendingSharedView else { return }
+        var performedAsyncRefresh = false
         if let layers = state.layers, !layers.isEmpty {
             self.layers = layers
+            performedAsyncRefresh = true
             Task {
                 if layers.contains(.satellites) { await refreshSatellites() }
                 if layers.contains(.launches) { await refreshLaunches() }
                 if layers.contains(.military) { await refreshMilitary() }
                 if layers.contains(.flights) { await refreshContacts(force: true) }
+                resolvePendingDeepLinkSelection()
             }
         }
         if let traffic = state.showTraffic { showTraffic = traffic }
@@ -600,7 +603,9 @@ final class AppState: ObservableObject {
             fly(to: center, distance: max(3_000, min(dist, AppState.globeDistance)))
         }
         pendingSharedView = nil
-        resolvePendingDeepLinkSelection()
+        if !performedAsyncRefresh {
+            resolvePendingDeepLinkSelection()
+        }
     }
 
     func dismissPendingSharedView() {

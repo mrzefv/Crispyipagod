@@ -101,19 +101,21 @@ struct GlobeView: View {
                     .annotationTitles(.hidden)
                 }
 
-                ForEach(s.visibleCameras) { cam in
-                    Annotation(cam.name, coordinate: cam.coord, anchor: .bottom) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 6).fill(Color.mint.opacity(0.22)).frame(width: 26, height: 20)
-                            Image(systemName: "video.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(.mint)
+                if s.layers.contains(.cameras) {
+                    ForEach(s.visibleCameras) { cam in
+                        Annotation(cam.name, coordinate: cam.coord, anchor: .bottom) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 6).fill(Color.mint.opacity(0.22)).frame(width: 26, height: 20)
+                                Image(systemName: "video.fill").font(.system(size: 10, weight: .bold)).foregroundStyle(.mint)
+                            }
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Public camera")
+                            .accessibilityValue("\(cam.name), \(cam.city)")
+                            .contentShape(Rectangle())
+                            .onTapGesture { s.select(Entity.from(cam)) }
                         }
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Public camera")
-                        .accessibilityValue("\(cam.name), \(cam.city)")
-                        .contentShape(Rectangle())
-                        .onTapGesture { s.select(Entity.from(cam)) }
+                        .annotationTitles(s.showLabels ? .visible : .hidden)
                     }
-                    .annotationTitles(s.showLabels ? .visible : .hidden)
                 }
 
                 if s.location.coordinate != nil {
