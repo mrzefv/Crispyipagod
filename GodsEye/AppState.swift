@@ -25,8 +25,9 @@ final class AppState: ObservableObject {
     @Published var contacts: [Contact] = [] { didSet { rebuildDisplay() } }
     @Published var militaryContacts: [Contact] = [] { didSet { rebuildDisplay() } }
     @Published var quakes: [Quake] = [] { didSet { rebuildDisplay() } }
-    @Published var iss: SatPos?
+    @Published var satellites: [SatPos] = []
     @Published var launches: [Launch] = []
+    @Published var cameras: [CameraFeed] = CameraFeed.defaults
     @Published var lastUpdate: Date?
     @Published var feedErrors = 0
 
@@ -55,7 +56,15 @@ final class AppState: ObservableObject {
     @Published var performanceMode: Bool { didSet { ud.set(performanceMode, forKey: "perf"); rebuildDisplay() } }
     @Published var offlineMode: Bool { didSet { ud.set(offlineMode, forKey: "offline"); Feeds.shared.offline = offlineMode } }
     @Published var showLabels: Bool { didSet { ud.set(showLabels, forKey: "labels") } }
+    @Published var showTraffic: Bool { didSet { ud.set(showTraffic, forKey: "traffic") } }
+    @Published var sensorStyleRaw: String { didSet { ud.set(sensorStyleRaw, forKey: "sensorStyle") } }
+    @Published var detectionOverlay: Bool { didSet { ud.set(detectionOverlay, forKey: "detectionOverlay") } }
+    @Published var tacticalHUD: Bool { didSet { ud.set(tacticalHUD, forKey: "tacticalHUD") } }
     @Published var cacheBytes: Int64 = FeedCache.size()
+
+    @Published var trackedEntityId: String?
+    @Published var trackTrail: [CLLocationCoordinate2D] = []
+    @Published var nearbyIndex = 0
 
     let location = LocationService()
     private let ud = UserDefaults.standard
@@ -77,6 +86,10 @@ final class AppState: ObservableObject {
         performanceMode = ud.object(forKey: "perf") as? Bool ?? true
         offlineMode = ud.bool(forKey: "offline")
         showLabels = ud.object(forKey: "labels") as? Bool ?? true
+        showTraffic = ud.object(forKey: "traffic") as? Bool ?? false
+        sensorStyleRaw = ud.string(forKey: "sensorStyle") ?? SensorStyle.normal.rawValue
+        detectionOverlay = ud.object(forKey: "detectionOverlay") as? Bool ?? false
+        tacticalHUD = ud.object(forKey: "tacticalHUD") as? Bool ?? false
         if let d = ud.data(forKey: "bookmarks"), let b = try? JSONDecoder().decode([Bookmark].self, from: d) { bookmarks = b }
         Feeds.shared.offline = offlineMode
     }
@@ -95,10 +108,40 @@ final class AppState: ObservableObject {
     var mapStyle: MapStyle {
         let elev: MapStyle.Elevation = performanceMode ? .flat : .realistic
         switch mapStyleRaw {
-        case "hybrid": return .hybrid(elevation: elev, pointsOfInterest: .excludingAll, showsTraffic: false)
-        case "standard": return .standard(elevation: elev, emphasis: .muted, pointsOfInterest: .excludingAll, showsTraffic: false)
+        case "hybrid": return .hybrid(elevation: elev, pointsOfInterest: .excludingAll, showsTraffic: showTraffic)
+        case "standard": return .standard(elevation: elev, emphasis: .muted, pointsOfInterest: .excludingAll, showsTraffic: showTraffic)
         default: return .imagery(elevation: elev)
         }
+    }
+
+    var sensorStyle: SensorStyle {
+        SensorStyle(rawValue: sensorStyleRaw) ?? .normal
+    }
+
+    var iss: SatPos? {
+        satellites.first(where: \.isISS) ?? satellites.first
+    }
+
+    var visibleSatellites: [SatPos] {
+        layers.contains(.satellites) ? satellites : []
+    }
+
+    var visibleCameras: [CameraFeed] {
+        guard layers.contains(.cameras) else { return [] }
+        if distance > 7_000_000 { return [] }
+        let ranked = cameras.map { ($0, $0.coord.distance(to: center)) }.sorted { $0.1 < $1.1 }
+        return ranked.prefix(distance > 1_500_000 ? 8 : 20).map(\.0)
+    }
+
+    var nearbyContacts: [Contact] {
+        visibleContacts.sorted { $0.coord.distance(to: center) < $1.coord.distance(to: center) }
+    }
+
+    var trackedEntity: Entity? {
+        guard let id = trackedEntityId else { return nil }
+        if let c = (contacts + militaryContacts).first(where: { "ac-\($0.id)" == id }) { return Entity.from(c) }
+        if let s = satellites.first(where: { "sat-\($0.id)" == id }) { return Entity.from(s) }
+        return selected?.id == id ? selected : nil
     }
 
     var pollInterval: UInt64 { performanceMode ? 30 : 15 }
@@ -176,8 +219,8 @@ final class AppState: ObservableObject {
         try? await Task.sleep(nanoseconds: 500_000_000)
         status = "Fetching seismic feed…"
         await refreshQuakes()
-        status = "Acquiring orbital fix…"
-        await refreshISS()
+        status = "Acquiring orbital tracks…"
+        await refreshSatellites()
         status = "Loading launch manifest…"
         await refreshLaunches()
         status = "Listening for transponders…"
@@ -199,10 +242,11 @@ final class AppState: ObservableObject {
                 guard let self, !Task.isCancelled else { return }
                 tick += 1
                 await self.refreshContacts(force: false)
-                if self.layers.contains(.satellites) { await self.refreshISS() }
+                if self.layers.contains(.satellites) { await self.refreshSatellites() }
                 if tick % 4 == 0, self.layers.contains(.military) { await self.refreshMilitary() }
                 if tick % 20 == 0 { await self.refreshQuakes() }
                 if tick % 120 == 0 { await self.refreshLaunches() }
+                self.updateTrackingTrail()
                 self.cacheBytes = FeedCache.size()
             }
         }
@@ -231,8 +275,8 @@ final class AppState: ObservableObject {
         do { quakes = try await Feeds.shared.quakes() } catch { feedErrors += 1 }
     }
 
-    func refreshISS() async {
-        do { iss = try await Feeds.shared.iss() } catch { feedErrors += 1 }
+    func refreshSatellites() async {
+        do { satellites = try await Feeds.shared.satellites() } catch { feedErrors += 1 }
     }
 
     func refreshLaunches() async {
@@ -242,7 +286,7 @@ final class AppState: ObservableObject {
     func refreshAll() async {
         await refreshContacts(force: true)
         await refreshQuakes()
-        await refreshISS()
+        await refreshSatellites()
         await refreshLaunches()
         if layers.contains(.military) { await refreshMilitary() }
         cacheBytes = FeedCache.size()
@@ -302,6 +346,7 @@ final class AppState: ObservableObject {
 
     func select(_ e: Entity, flyTo: Bool = true) {
         if flyTo { fly(to: e.coord, distance: e.viewDistance, pitch: e.kind == .place ? 50 : 35) }
+        if let idx = nearbyContacts.firstIndex(where: { "ac-\($0.id)" == e.id }) { nearbyIndex = idx }
         if showTimeline {
             focusedEvent = e
             showTimeline = false
@@ -309,6 +354,7 @@ final class AppState: ObservableObject {
         } else {
             selected = e
         }
+        if trackedEntityId == e.id { updateTrackingTrail() }
     }
 
     func tapPoint(_ c: CLLocationCoordinate2D) {
@@ -319,12 +365,124 @@ final class AppState: ObservableObject {
         }
     }
 
+    func toggleTracking(_ e: Entity?) {
+        guard let e else {
+            trackedEntityId = nil
+            trackTrail = []
+            return
+        }
+        if trackedEntityId == e.id {
+            trackedEntityId = nil
+            trackTrail = []
+            return
+        }
+        trackedEntityId = e.id
+        trackTrail = [e.coord]
+        fly(to: e.coord, distance: max(8_000, min(e.viewDistance * 1.1, 120_000)), pitch: 55, heading: 0)
+    }
+
+    func trackSelected() {
+        toggleTracking(selected)
+    }
+
+    func updateTrackingTrail() {
+        guard let e = trackedEntity else { return }
+        if trackTrail.last?.distance(to: e.coord) ?? .greatestFiniteMagnitude > 30 {
+            trackTrail.append(e.coord)
+            if trackTrail.count > 40 { trackTrail.removeFirst(trackTrail.count - 40) }
+        }
+        fly(to: e.coord, distance: max(7_000, min(e.viewDistance * 1.05, 100_000)), pitch: 60, heading: 0)
+    }
+
+    func cycleNearby(forward: Bool) {
+        let list = nearbyContacts
+        guard !list.isEmpty else { return }
+        if forward {
+            nearbyIndex = (nearbyIndex + 1) % list.count
+        } else {
+            nearbyIndex = (nearbyIndex - 1 + list.count) % list.count
+        }
+        select(Entity.from(list[nearbyIndex]))
+    }
+
+    func nearestCamera(to e: Entity) -> CameraFeed? {
+        cameras.min { $0.coord.distance(to: e.coord) < $1.coord.distance(to: e.coord) }
+    }
+
+    func handoffToNearestCamera() {
+        guard let e = selected ?? trackedEntity, let cam = nearestCamera(to: e) else { return }
+        select(Entity.from(cam))
+    }
+
+    func applyMission(_ m: MissionPreset) {
+        switch m {
+        case .liveContacts:
+            layers.formUnion([.flights, .military, .satellites, .cameras])
+            showTraffic = true
+            if let c = nearbyContacts.first ?? contacts.first { select(Entity.from(c)) }
+        case .space:
+            layers = [.satellites, .launches]
+            if let sat = iss { select(Entity.from(sat)) }
+            else if let l = launches.first { select(Entity.from(l)) }
+        case .environmental:
+            layers = [.quakes, .cameras]
+            showTraffic = false
+            if let q = quakes.first { select(Entity.from(q)) }
+        }
+    }
+
+    func shareURL(for entity: Entity?) -> URL? {
+        var comps = URLComponents()
+        comps.scheme = "godseye"
+        comps.host = "view"
+        var items: [URLQueryItem] = [
+            .init(name: "lat", value: String(format: "%.6f", center.latitude)),
+            .init(name: "lon", value: String(format: "%.6f", center.longitude)),
+            .init(name: "dist", value: String(format: "%.0f", distance)),
+            .init(name: "layers", value: layers.map(\.rawValue).sorted().joined(separator: ",")),
+            .init(name: "sensor", value: sensorStyle.rawValue),
+            .init(name: "traffic", value: showTraffic ? "1" : "0")
+        ]
+        if let entity {
+            items.append(.init(name: "sel", value: entity.id))
+            items.append(.init(name: "title", value: entity.title))
+            items.append(.init(name: "slat", value: String(format: "%.6f", entity.lat)))
+            items.append(.init(name: "slon", value: String(format: "%.6f", entity.lon)))
+        }
+        comps.queryItems = items
+        return comps.url
+    }
+
+    func handleDeepLink(_ url: URL) {
+        guard let comps = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              url.scheme == "godseye",
+              let q = comps.queryItems else { return }
+        func qv(_ name: String) -> String? { q.first(where: { $0.name == name })?.value }
+        if let csv = qv("layers") {
+            let set = Set(csv.split(separator: ",").compactMap { Layer(rawValue: String($0)) })
+            if !set.isEmpty { layers = set }
+        }
+        if let traffic = qv("traffic") { showTraffic = (traffic == "1") }
+        if let sensor = qv("sensor"), SensorStyle(rawValue: sensor) != nil { sensorStyleRaw = sensor }
+        if let la = qv("lat").flatMap(Double.init),
+           let lo = qv("lon").flatMap(Double.init),
+           let dist = qv("dist").flatMap(Double.init) {
+            fly(to: .init(latitude: la, longitude: lo), distance: max(3_000, min(dist, AppState.globeDistance)))
+        }
+        if let title = qv("title"),
+           let la = qv("slat").flatMap(Double.init),
+           let lo = qv("slon").flatMap(Double.init) {
+            selected = Entity.place(lat: la, lon: lo, name: title, detail: "Shared target", distance: 20_000)
+        }
+    }
+
     func entity(forBookmark b: Bookmark) -> Entity {
         // Prefer live data if the bookmarked thing is still on the globe.
         if b.kind == .aircraft || b.kind == .military, let c = (contacts + militaryContacts).first(where: { "ac-\($0.id)" == b.id }) { return Entity.from(c) }
         if b.kind == .earthquake, let q = quakes.first(where: { "eq-\($0.id)" == b.id }) { return Entity.from(q) }
         if b.kind == .launch, let l = launches.first(where: { "ll-\($0.id)" == b.id }) { return Entity.from(l) }
-        if b.kind == .satellite, let s = iss { return Entity.from(s) }
+        if b.kind == .satellite, let s = satellites.first(where: { "sat-\($0.id)" == b.id }) ?? iss { return Entity.from(s) }
+        if b.kind == .camera, let cam = cameras.first(where: { $0.id == b.id }) { return Entity.from(cam) }
         return b.entity
     }
 

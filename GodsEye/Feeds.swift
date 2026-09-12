@@ -37,6 +37,12 @@ enum FeedCache {
 final class Feeds {
     static let shared = Feeds()
     var offline = false
+    private let satelliteCatalog: [(id: String, name: String)] = [
+        ("25544", "ISS"),
+        ("20580", "Hubble"),
+        ("43013", "NOAA 20"),
+        ("40069", "AISSat-1")
+    ]
 
     private let session: URLSession = {
         let c = URLSessionConfiguration.default
@@ -97,7 +103,34 @@ final class Feeds {
         let r = try JSONDecoder().decode(ISSResponse.self, from: d)
         return SatPos(id: "25544", name: r.name, lat: r.latitude, lon: r.longitude,
                       altKm: r.altitude, velocityKmh: r.velocity,
-                      time: Date(timeIntervalSince1970: r.timestamp))
+                      time: Date(timeIntervalSince1970: r.timestamp), source: "wheretheiss.at")
+    }
+
+    func satellites() async throws -> [SatPos] {
+        var out: [SatPos] = []
+        for sat in satelliteCatalog {
+            let cache = "sat-\(sat.id).json"
+            do {
+                let d = try await fetch("https://api.wheretheiss.at/v1/satellites/\(sat.id)", cache: cache)
+                let r = try JSONDecoder().decode(ISSResponse.self, from: d)
+                out.append(SatPos(
+                    id: sat.id,
+                    name: r.name.isEmpty ? sat.name : r.name,
+                    lat: r.latitude,
+                    lon: r.longitude,
+                    altKm: r.altitude,
+                    velocityKmh: r.velocity,
+                    time: Date(timeIntervalSince1970: r.timestamp),
+                    source: "wheretheiss.at"
+                ))
+            } catch {
+                if sat.id == "25544", let iss = try? await iss() {
+                    out.append(iss)
+                }
+            }
+        }
+        guard !out.isEmpty else { throw FeedError.badResponse }
+        return out
     }
 
     func launches() async throws -> [Launch] {

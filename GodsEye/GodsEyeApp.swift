@@ -30,6 +30,7 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.7), value: s.ready)
         .task { await s.boot() }
+        .onOpenURL { s.handleDeepLink($0) }
     }
 }
 

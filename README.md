@@ -15,11 +15,12 @@ Target: iOS 17+. Bundle id `party.mrvek.godseye`.
 ## Screens
 
 - **Splash** — animated globe, status line, auto-transitions when feeds are primed.
-- **Home** — MapKit 3D globe (imagery / hybrid / standard), top bar Search · Layers · Time, bottom panel (center name, coords, LIVE/REPLAY, counts, quick actions). Tap any marker or empty ground for details.
+- **Home** — MapKit 3D globe (imagery / hybrid / standard + optional traffic), top bar Search · Layers · Missions · Time, bottom panel (center name, coords, LIVE/REPLAY, counts, quick actions). Tap any marker or empty ground for details.
 - **Detail sheet** — half-sheet, expandable to full: title, coords, summary, metadata, Save / Timeline / Share, source link, open in Maps.
 - **Timeline** — −24h → +72h scrubber, play/pause, event markers (M4.5+ quakes, launches), prev/next jump, GO LIVE. Time state persists on the globe.
 - **Saved** — bookmarks, swipe to delete, tap to fly back.
-- **Settings** — accent theme, map style, labels, performance mode, offline mode, cache size/clear, sources, about.
+- **Settings** — accent theme, map style, sensor style (NVG/FLIR/CRT/Noir), detection/HUD overlays, labels, performance mode, offline mode, cache size/clear, sources, about.
+- **Tracking + Share** — target lock with chase camera trail, nearest-contact step-through, camera handoff, deep links (`godseye://view?...`) that encode view/layers/selection.
 
 ## Feeds (no keys)
 
@@ -28,7 +29,8 @@ Target: iOS 17+. Bundle id `party.mrvek.godseye`.
 | Flights | adsb.lol `/v2/lat/lon/dist/250` around map center |
 | Military | adsb.lol `/v2/mil` |
 | Earthquakes | USGS `all_day.geojson` |
-| ISS | wheretheiss.at |
+| Satellites | wheretheiss.at (ISS + additional public NORAD IDs) |
 | Space missions | Launch Library 2 (previous 10 + upcoming 15) |
+| Public cameras | Curated public city camera portals (overlay points + source links) |
 
 Last good payload of every feed is cached to disk; offline mode serves cache only.
