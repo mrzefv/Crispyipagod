@@ -500,10 +500,16 @@ final class AppState: ObservableObject {
         let pendingTraffic = qv("traffic").map { $0 == "1" }
         let pendingSensor = qv("sensor").flatMap { SensorStyle(rawValue: $0) != nil ? $0 : nil }
         let pendingCenter: CLLocationCoordinate2D? = {
-            guard let la = qv("lat").flatMap(Double.init), let lo = qv("lon").flatMap(Double.init) else { return nil }
+            guard let laRaw = qv("lat").flatMap(Double.init), let loRaw = qv("lon").flatMap(Double.init),
+                  laRaw.isFinite, loRaw.isFinite else { return nil }
+            let la = min(max(laRaw, -90), 90)
+            let lo = min(max(loRaw, -180), 180)
             return .init(latitude: la, longitude: lo)
         }()
-        let pendingDist = qv("dist").flatMap(Double.init)
+        let pendingDist: Double? = {
+            guard let d = qv("dist").flatMap(Double.init), d.isFinite else { return nil }
+            return max(3_000, min(d, AppState.globeDistance))
+        }()
         if pendingStateLayers != nil || pendingTraffic != nil || pendingSensor != nil || pendingCenter != nil || pendingDist != nil {
             pendingSharedView = SharedViewState(
                 layers: pendingStateLayers,
@@ -576,7 +582,15 @@ final class AppState: ObservableObject {
 
     func applyPendingSharedView() {
         guard let state = pendingSharedView else { return }
-        if let layers = state.layers, !layers.isEmpty { self.layers = layers }
+        if let layers = state.layers, !layers.isEmpty {
+            self.layers = layers
+            Task {
+                if layers.contains(.satellites) { await refreshSatellites() }
+                if layers.contains(.launches) { await refreshLaunches() }
+                if layers.contains(.military) { await refreshMilitary() }
+                if layers.contains(.flights) { await refreshContacts(force: true) }
+            }
+        }
         if let traffic = state.showTraffic { showTraffic = traffic }
         if let sensor = state.sensor { sensorStyleRaw = sensor }
         if let center = state.center {
