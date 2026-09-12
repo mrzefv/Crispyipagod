@@ -35,7 +35,7 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 s.cctv.resume()
-            } else if phase == .background {
+            } else {
                 s.cctv.stop()
             }
         }

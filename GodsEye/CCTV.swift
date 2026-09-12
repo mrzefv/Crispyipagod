@@ -147,7 +147,11 @@ final class CamRecorder {
     private func frameURLs(in dir: URL) -> [URL] {
         (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles]))?
             .filter { ["jpg", "jpeg", "png"].contains($0.pathExtension.lowercased()) }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent } ?? []
+            .sorted {
+                let lhs = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                let rhs = (try? $1.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                return lhs < rhs
+            } ?? []
     }
 
     private func cameraDirectory(for id: String) -> URL {
@@ -250,8 +254,11 @@ struct CameraLiveView: View {
                         Label("Camera offline", systemImage: "video.slash")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .foregroundStyle(.secondary)
+                            .accessibilityLabel("Live camera feed for \(camera.name) is offline")
                     default:
-                        ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                        ProgressView()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .accessibilityLabel("Loading live camera feed for \(camera.name)")
                     }
                 }
             }
