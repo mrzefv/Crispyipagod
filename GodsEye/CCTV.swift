@@ -125,7 +125,7 @@ final class CamRecorder {
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
         let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
         if lastFrameDigests[id] == digest { return }
-        let url = dir.appendingPathComponent("\(Int(Date().timeIntervalSince1970 * 1000)).jpg")
+        let url = dir.appendingPathComponent("\(UUID().uuidString).jpg")
         try? data.write(to: url, options: .atomic)
         lastFrameDigests[id] = digest
         let updated = frameURLs(in: dir)
@@ -193,7 +193,6 @@ struct CameraLiveView: View {
 
     @State private var player: AVPlayer?
     @State private var loopObserver: NSObjectProtocol?
-    @State private var imageTick = 0
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -211,13 +210,6 @@ struct CameraLiveView: View {
             controls
         }
         .task(id: camera.id) { startPlayback() }
-        .task(id: camera.id) {
-            guard !camera.isLiveVideo, camera.videoURL == nil else { return }
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 6_000_000_000)
-                imageTick += 1
-            }
-        }
         .onAppear {
             s.fly(to: camera.coord,
                   distance: 1_200,
@@ -311,12 +303,7 @@ struct CameraLiveView: View {
     }
 
     private var stillURL: URL? {
-        guard var components = URLComponents(string: camera.imageURL) else { return URL(string: camera.imageURL) }
-        var items = components.queryItems ?? []
-        items.removeAll { $0.name == "t" }
-        items.append(URLQueryItem(name: "t", value: "\(imageTick)"))
-        components.queryItems = items
-        return components.url
+        URL(string: camera.imageURL)
     }
 
     private func startPlayback() {
