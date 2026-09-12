@@ -1231,7 +1231,7 @@ struct Entity: Identifiable, Equatable {
         if !metaRows.contains(where: { $0.key == "Source" }) {
             metaRows.append(MetaRow("Source", "Apple Maps geocoder"))
         }
-        Entity(
+        return Entity(
             id: "pt-\(String(format: "%.4f-%.4f", lat, lon))",
             kind: .place,
             title: name,

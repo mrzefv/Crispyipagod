@@ -1069,7 +1069,7 @@ struct SearchSheet: View {
         let c = item.placemark.coordinate
         let name = item.name ?? "Location"
         let detail = item.placemark.title ?? ""
-        let extraMeta = placeMetadata(from: item.placemark)
+        let extraMeta = placeMetadata(from: item.placemark, category: item.pointOfInterestCategory)
         dismiss()
         Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
@@ -1083,9 +1083,12 @@ struct SearchSheet: View {
         }
     }
 
-    private func placeMetadata(from p: MKPlacemark) -> [MetaRow] {
+    private func placeMetadata(from p: MKPlacemark, category: MKPointOfInterestCategory?) -> [MetaRow] {
         var rows: [MetaRow] = []
-        if let poi = p.pointOfInterestCategory?.rawValue, !poi.isEmpty { rows.append(MetaRow("Category", poi.replacingOccurrences(of: "_", with: " ").capitalized)) }
+        if let poi = category?.rawValue, !poi.isEmpty {
+            let clean = poi.replacingOccurrences(of: "MKPOICategory", with: "").replacingOccurrences(of: "_", with: " ")
+            rows.append(MetaRow("Category", clean.capitalized))
+        }
         let address = [p.subThoroughfare, p.thoroughfare, p.subLocality, p.locality, p.administrativeArea, p.postalCode, p.country]
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }

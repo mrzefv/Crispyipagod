@@ -164,6 +164,8 @@ final class AppState: ObservableObject {
     let radio = RadioPlayer()
     let cctv = CamRecorder()
     @Published var liveCamera: Camera?
+    @Published var intel: [String: PlaceIntel] = [:]
+    @Published var intelLoading: Set<String> = []
     private var orbitTask: Task<Void, Never>?
     private var replayTask: Task<Void, Never>?
     private var sceneTask: Task<Void, Never>?
@@ -274,6 +276,26 @@ final class AppState: ObservableObject {
     func openLive(_ cam: Camera) {
         selected = nil
         Task { try? await Task.sleep(nanoseconds: 350_000_000); self.liveCamera = cam }
+    }
+
+    // MARK: Place records (public API lookups for tapped / picked places)
+
+    func lookupIntel(for e: Entity, force: Bool = false) {
+        guard e.kind == .place else { return }
+        if !force, let cached = intel[e.id], Date().timeIntervalSince(cached.fetchedAt) < 1800 { return }
+        guard !intelLoading.contains(e.id) else { return }
+        intelLoading.insert(e.id)
+        let coord = e.coord
+        let id = e.id
+        Task {
+            let result = await Feeds.shared.placeIntel(at: coord)
+            intel[id] = result
+            intelLoading.remove(id)
+            if intel.count > 40 {
+                let oldest = intel.sorted { $0.value.fetchedAt < $1.value.fetchedAt }.prefix(intel.count - 40).map(\.key)
+                for k in oldest { intel[k] = nil }
+            }
+        }
     }
 
     // MARK: Derived
