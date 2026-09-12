@@ -271,6 +271,16 @@ struct Scene3DView: View {
             if let id = msg["id"] as? String { trackEntity(id) }
         case "cockpit":
             cockpit = (msg["on"] as? Bool) ?? false
+        case "ctx":
+            switch msg["action"] as? String {
+            case "prev": s.stepRoster(forward: false); UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            case "next": s.stepRoster(forward: true); UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            case "nearest": s.trackNearest(kind: msg["kind"] as? String)
+            case "stop": s.stopTracking(); cockpit = false; bridge.eval("GE.setCockpit(false)")
+            case "cockpit": cockpit.toggle(); bridge.eval("GE.setCockpit(\(cockpit))")
+            case "focus": if let tc = s.trackedCoord { bridge.eval(String(format: "GE.focus(%.6f,%.6f)", tc.latitude, tc.longitude)) }
+            default: break
+            }
         default: break
         }
     }
@@ -360,6 +370,7 @@ struct Scene3DView: View {
             let c = (s.contacts + s.militaryContacts).first { "ac-\($0.id)" == te.id }
             track = ["id": te.id, "lat": tc.latitude, "lon": tc.longitude, "alt": Double(c?.altFt ?? 0) * 0.3048,
                      "heading": c?.track ?? 0, "spd": c?.groundSpeedKt ?? 0, "label": te.title, "kind": te.kind.rawValue,
+                     "sub": [c?.type ?? "", c?.registration ?? "", c?.military == true ? "MILITARY" : ""].filter { !$0.isEmpty }.joined(separator: " · "),
                      "trail": s.trail.suffix(200).flatMap { [$0.longitude, $0.latitude] }]
         }
         let payload: [String: Any] = ["entities": items, "polys": polys, "selected": sel, "track": track,
@@ -530,6 +541,21 @@ html,body{margin:0;padding:0;height:100%;background:#000;overflow:hidden;-webkit
 #compass{position:absolute;left:0;right:0;bottom:calc(env(safe-area-inset-bottom) + 40px);text-align:center;font-size:9px;letter-spacing:.4em;color:var(--dim);white-space:nowrap;overflow:hidden}
 #cockname{position:absolute;left:14px;top:calc(env(safe-area-inset-top) + 100px);font-size:12px;color:#fff;letter-spacing:.1em}
 #cockname small{display:block;font-size:8px;color:var(--dim);letter-spacing:.2em}
+#ctxp{position:absolute;right:10px;bottom:calc(env(safe-area-inset-bottom) + 96px);width:46vw;max-height:34vh;overflow:hidden;pointer-events:auto;background:rgba(6,8,10,.78);border:1px solid rgba(255,255,255,.14);border-radius:6px;font-size:8px;letter-spacing:.05em;backdrop-filter:blur(6px)}
+#ctxp .hd{padding:6px 8px 4px;border-bottom:1px solid rgba(255,255,255,.1);color:var(--dim);letter-spacing:.2em;display:flex;justify-content:space-between;align-items:center}
+#ctxp .hd b{color:#fff}
+#ctxp .btns{display:flex;gap:4px;padding:5px 6px;border-bottom:1px solid rgba(255,255,255,.08)}
+#ctxp button{flex:1;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);color:#fff;font:700 8px var(--mono);letter-spacing:.14em;padding:5px 2px;border-radius:3px}
+#ctxp button.a{background:var(--acc);color:#000;border-color:var(--acc)}
+#ctxp button.r{border-color:#ff3b30;color:#ff8a80}
+#ctxp .ls{overflow-y:auto;max-height:calc(34vh - 62px)}
+#ctxp .g{padding:5px 8px 2px;color:#fff;font-weight:700;letter-spacing:.14em;display:flex;justify-content:space-between}
+#ctxp .g span{color:var(--dim);font-weight:400}
+#ctxp .row{display:flex;justify-content:space-between;padding:3px 8px;color:var(--ink);border-top:1px solid rgba(255,255,255,.04)}
+#ctxp .row.t{color:var(--acc)}
+#ctxp .row i{font-style:normal;color:var(--dim)}
+#ctxp .sub{padding:0 8px 4px;color:var(--dim);font-size:7px}
+#ctxp.hid .ls,#ctxp.hid .btns{display:none}
 </style></head><body>
 <div id="c"></div>
 <div id="hud">
@@ -544,6 +570,12 @@ html,body{margin:0;padding:0;height:100%;background:#000;overflow:hidden;-webkit
   <div class="blk" id="tr"><span id="rec"></span><span class="d">REC</span> <b id="clock">—</b><br><span class="d">ORB:</span> <span id="orb">0</span> <span class="d">PASS:</span> <span id="pass">0</span><br><span class="d">AC</span> <span id="nac">0</span> <span class="d">SH</span> <span id="nsh">0</span> <span class="d">SAT</span> <span id="nsat">0</span> <span class="d">CAM</span> <span id="ncam">0</span></div>
   <div class="blk" id="bl"><span class="d">MGRS:</span> <b id="mgrs">—</b><br><span id="ll">—</span><br><span class="d">SRC</span> <span id="src">ESRI</span> <span class="d">DENS</span> <span id="dens">0</span></div>
   <div class="blk" id="brt"><span class="d">GSD:</span> <b id="gsd">—</b> <span class="d">NIIRS:</span> <b id="niirs">—</b><br><span class="d">ALT:</span> <span id="alt">—</span> <span class="d">HDG:</span> <span id="hdg">—</span> <span class="d">PIT:</span> <span id="pit">—</span><br><span class="d">AZ:</span> <span id="az">—</span></div>
+  <div id="ctxp" class="hid">
+    <div class="hd"><span>CONTEXT</span><b id="ctxt">—</b><span id="ctxtog" style="pointer-events:auto;color:#fff">▾</span></div>
+    <div class="btns"><button id="bprev">◀ PREV</button><button id="bfocus" class="a">FOCUS</button><button id="bnext">NEXT ▶</button></div>
+    <div class="btns"><button id="bcock">✈ COCKPIT</button><button id="bnear">NEAREST</button><button id="bstop" class="r">STOP</button></div>
+    <div class="ls" id="ctxl"></div>
+  </div>
   <div id="cock">
     <div id="horizon"></div>
     <div id="cockname"><span id="cname">—</span><small>FIRST PERSON · MILITARY-GRADE TRACK</small></div>
@@ -655,6 +687,8 @@ const SHADERS = {
       out_FragColor = vec4(col, 1.); }`
 };
 
+const PLANE_GLB = 'data:model/gltf-binary;base64,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';
+const SHIP_GLB = 'data:model/gltf-binary;base64,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';
 window.GE = (() => {
   let viewer, tileset = null, buildings = null, customAssets = [], stage = null, cfg = {}, hudOn = true, sensor = 'normal';
   let customTs = new Map(), lastData = null, cockpit = false, camImgs = new Map(), t0 = Date.now();
@@ -762,6 +796,7 @@ window.GE = (() => {
     viewer.scene.skyAtmosphere.show = true;
     setBasemap(cfg.basemap || 'esriImagery'); setTerrain(!!cfg.terrain); setBuildings(!!cfg.buildings); loadAssets(cfg.assets);
     setSensor(cfg.sensor || 'normal'); setHUD(cfg.hud !== false);
+    bindCtx();
     $('kh').textContent = String(4000 + Math.floor(Math.random()*999)); $('ops').textContent = String(4100 + Math.floor(Math.random()*99));
 
     const h = new Cesium.ScreenSpaceEventHandler(viewer.canvas);
@@ -935,6 +970,50 @@ window.GE = (() => {
     viewer.scene.requestRender();
   }
 
+  // ---- context panel ----
+  const nwFrame = Cesium.Transforms.localFrameToFixedFrameGenerator('north', 'west');
+  function orient(pos, headingDeg){ return Cesium.Transforms.headingPitchRollQuaternion(pos, new Cesium.HeadingPitchRoll(Cesium.Math.toRadians(headingDeg||0), 0, 0), Cesium.Ellipsoid.WGS84, nwFrame); }
+  function detBox(){ const k='__det'; if (spriteCache.has(k)) return spriteCache.get(k); const cv=document.createElement('canvas'); const s=64; cv.width=s*2; cv.height=s*2; const c=cv.getContext('2d'); c.scale(2,2); c.strokeStyle='#ffffff'; c.lineWidth=1.5; const L=14; [[0,0,1,1],[s,0,-1,1],[0,s,1,-1],[s,s,-1,-1]].forEach(([x,y,dx,dy])=>{ c.beginPath(); c.moveTo(x,y+dy*L); c.lineTo(x,y); c.lineTo(x+dx*L,y); c.stroke(); }); c.strokeStyle='rgba(255,255,255,.35)'; c.strokeRect(1,1,s-2,s-2); spriteCache.set(k,cv); return cv; }
+  let ctxOpen = true, ctxKind = 'flights';
+  function bindCtx(){
+    $('ctxtog').onclick = () => { ctxOpen = !ctxOpen; $('ctxp').classList.toggle('hid', !ctxOpen); $('ctxtog').textContent = ctxOpen ? '▾' : '▸'; };
+    $('bprev').onclick = () => post({type:'ctx', action:'prev'});
+    $('bnext').onclick = () => post({type:'ctx', action:'next'});
+    $('bfocus').onclick = () => post({type:'ctx', action:'focus'});
+    $('bcock').onclick = () => post({type:'ctx', action:'cockpit'});
+    $('bnear').onclick = () => post({type:'ctx', action:'nearest', kind: 'aircraft'});
+    $('bstop').onclick = () => post({type:'ctx', action:'stop'});
+    $('ctxp').classList.toggle('hid', !ctxOpen);
+  }
+  function focus(lat, lon){ if (!viewer) return; const c = viewer.camera.positionCartographic; viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(lon, lat, Math.max(2500, Math.min(c.height, 40000))), orientation: { heading: viewer.camera.heading, pitch: Cesium.Math.toRadians(-55), roll: 0 }, duration: 1.0 }); }
+  function renderCtx(d){
+    const t = d.track && d.track.id ? d.track : null;
+    const origin = t ? Cesium.Cartesian3.fromDegrees(t.lon, t.lat, t.alt||0) : (() => { const c = centerLL(); return Cesium.Cartesian3.fromDegrees(c.lon, c.lat, 0); })();
+    const oll = t ? {lat:t.lat, lon:t.lon} : centerLL();
+    const groups = { 'FLIGHTS': [], 'MILITARY FLIGHTS': [], 'AIS VESSELS': [] };
+    for (const e of (d.entities||[])) {
+      if (t && e.id === t.id) continue;
+      const g = e.kind === 'ac' ? (e.mil ? 'MILITARY FLIGHTS' : 'FLIGHTS') : e.kind === 'sh' ? 'AIS VESSELS' : null;
+      if (!g) continue;
+      const dist = Cesium.Cartesian3.distance(origin, Cesium.Cartesian3.fromDegrees(e.lon, e.lat, e.alt||0));
+      if (dist > 250000) continue;
+      groups[g].push({ e, dist, brg: bearing(oll.lat, oll.lon, e.lat, e.lon) });
+    }
+    $('ctxt').textContent = t ? (t.label||'').toUpperCase() + ' · 250 KM WINDOW' : 'VIEWPORT · 250 KM';
+    let html = '';
+    for (const [g, arr] of Object.entries(groups)) {
+      arr.sort((a,b) => a.dist - b.dist);
+      html += `<div class="g">${g}<span>${arr.length}</span></div>`;
+      html += `<div class="sub">${g === 'AIS VESSELS' ? 'aisstream · live' : 'adsb.lol · observed or mapped nearby'}</div>`;
+      for (const h of arr.slice(0, 8)) html += `<div class="row" data-id="${h.e.id}"><span>${h.e.label}</span><i>${(h.dist/1000).toFixed(0)} km · ${String(Math.round(h.brg)).padStart(3,'0')}°</i></div>`;
+      if (!arr.length) html += '<div class="row"><i>none in window</i></div>';
+    }
+    $('ctxl').innerHTML = html;
+    for (const r of $('ctxl').querySelectorAll('.row[data-id]')) r.onclick = () => post({type:'track', id: r.dataset.id});
+    $('bcock').classList.toggle('a', cockpit);
+    return groups;
+  }
+
   // ---- data ----
   const colors = { ac:'#4de3ff', mil:'#ffa63d', sh:'#5aa9ff', cam:'#c77dff', eq:'#ff6a3d', fire:'#ff3b30', sat:'#9ad7ff', train:'#ffd166', apt:'#8ecae6', infra:'#2ec4b6', storm:'#c77dff' };
   const icons = { ac:'✈', sh:'⛴', cam:'▣', eq:'◎', fire:'▲', sat:'✦', train:'▬', apt:'⊕', infra:'▦', storm:'≋' };
@@ -953,11 +1032,13 @@ window.GE = (() => {
       const isCam = e.kind === 'cam';
       const img = boxed ? (isCam && camH < 8000 ? (camImgs.get(e.id) || sprite(e.label, e.sub, col, { icon: '▣' })) : sprite(e.label, e.sub, col, { icon: icons[e.kind] || '▣' })) : null;
       if (isCam && camH < 8000 && !camImgs.has(e.id)) { camImgs.set(e.id, null); camCard(e.img, e.label).then(cv => { camImgs.set(e.id, cv); const en = viewer.entities.getById(id); if (en && en.billboard) { en.billboard.image = cv; viewer.scene.requestRender(); } }); }
+      const useModel = boxed && camH < 30000 && (e.kind === 'ac' || e.kind === 'sh');
       if (!ent) {
-        ent = viewer.entities.add({ id, position: pos,
+        ent = viewer.entities.add({ id, position: pos, orientation: orient(pos, e.heading),
+          model: (e.kind === 'ac' || e.kind === 'sh') ? { uri: e.kind === 'ac' ? PLANE_GLB : SHIP_GLB, minimumPixelSize: 26, maximumScale: 400, scale: e.kind === 'ac' ? 1.4 : 1.0, color: cc.withAlpha(.95), colorBlendMode: Cesium.ColorBlendMode.MIX, colorBlendAmount: .55, silhouetteColor: Cesium.Color.WHITE.withAlpha(.35), silhouetteSize: 1, show: useModel, heightReference: e.kind === 'sh' ? Cesium.HeightReference.CLAMP_TO_GROUND : Cesium.HeightReference.NONE } : undefined,
           point: { pixelSize: e.kind==='ac'?6:5, color: cc, outlineColor: Cesium.Color.BLACK, outlineWidth: 1, heightReference: e.kind==='ac'?Cesium.HeightReference.NONE:Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY, show: !boxed },
-          billboard: { image: img || sprite(e.label, e.sub, col), verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0,-6), scale: 0.5, heightReference: e.kind==='ac'?Cesium.HeightReference.NONE:Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY, show: boxed, scaleByDistance: new Cesium.NearFarScalar(500,1.0,200000,0.45) } });
-      } else { ent.position = pos; if (boxed && img) ent.billboard.image = img; ent.point.show = !boxed; ent.billboard.show = boxed; }
+          billboard: { image: img || sprite(e.label, e.sub, col), verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, useModel ? -22 : -6), scale: 0.5, heightReference: e.kind==='ac'?Cesium.HeightReference.NONE:Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY, show: boxed, scaleByDistance: new Cesium.NearFarScalar(500,1.0,200000,0.45) } });
+      } else { ent.position = pos; ent.orientation = orient(pos, e.heading); if (boxed && img) ent.billboard.image = img; ent.point.show = !boxed; ent.billboard.show = boxed; if (ent.model) { ent.model.show = useModel; } ent.billboard.pixelOffset = new Cesium.Cartesian2(0, useModel ? -22 : -6); }
       if (e.watch && ent.billboard) ent.billboard.color = Cesium.Color.fromCssColorString('#ffb0b0');
       if (e.kind === 'eq' && e.r) { const rid = 'r:' + e.id; keep.add(rid); if (!viewer.entities.getById(rid)) viewer.entities.add({ id: rid, position: Cesium.Cartesian3.fromDegrees(e.lon, e.lat, 0), ellipse: { semiMajorAxis: e.r, semiMinorAxis: e.r, material: cc.withAlpha(.12), outline: true, outlineColor: cc.withAlpha(.7), classificationType: Cesium.ClassificationType.BOTH } }); }
       if (e.kind === 'storm' && e.heading >= 0) { const vid = 'v:' + e.id; keep.add(vid); const end = Cesium.Cartesian3.fromDegrees(e.lon + Math.sin(e.heading*Math.PI/180)*.05, e.lat + Math.cos(e.heading*Math.PI/180)*.05, 0); const ve = viewer.entities.getById(vid); if (!ve) viewer.entities.add({ id: vid, polyline: { positions: [pos, end], width: 2, material: new Cesium.PolylineDashMaterialProperty({ color: cc }), clampToGround: true } }); else ve.polyline.positions = [pos, end]; }
@@ -982,10 +1063,24 @@ window.GE = (() => {
     if (d.track && d.track.id) {
       keep.add('trk'); keep.add('trail');
       const t = d.track, pos = Cesium.Cartesian3.fromDegrees(t.lon, t.lat, t.alt||0);
-      const sp = sprite(t.label||t.id, 'TRACKING · ' + Math.round(t.spd||0) + ' KTS · ' + Math.round((t.alt||0)*3.281).toLocaleString() + ' FT', '#ff3b30', { icon: '◉' });
+      const sp = sprite((t.label||t.id) + ' · ' + Math.round((t.alt||0)*3.281).toLocaleString() + ' FT · ' + Math.round(t.spd||0) + ' KTS', t.sub || 'TRACKING', '#ffffff', {});
       let ent = viewer.entities.getById('trk');
       if (!ent) viewer.entities.add({ id:'trk', position: pos, billboard:{ image: sp, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, scale: 0.55, disableDepthTestDistance: Number.POSITIVE_INFINITY } });
       else { ent.position = pos; ent.billboard.image = sp; }
+      // detection box on the tracked target + leader lines to the nearest contacts
+      keep.add('det');
+      let det = viewer.entities.getById('det');
+      if (!det) viewer.entities.add({ id:'det', position: pos, billboard:{ image: detBox(), scale: .8, disableDepthTestDistance: Number.POSITIVE_INFINITY } }); else det.position = pos;
+      const near = (d.entities||[]).filter(e => e.id !== t.id && (e.kind === 'ac' || e.kind === 'sh')).map(e => ({ e, dist: Cesium.Cartesian3.distance(pos, Cesium.Cartesian3.fromDegrees(e.lon, e.lat, e.alt||0)) })).sort((a,b) => a.dist - b.dist).slice(0, 5);
+      near.forEach((h, i) => {
+        const lid = 'ld:' + i; keep.add(lid);
+        const p2 = Cesium.Cartesian3.fromDegrees(h.e.lon, h.e.lat, h.e.alt||0);
+        const mid = Cesium.Cartesian3.midpoint(pos, p2, new Cesium.Cartesian3());
+        const card = sprite(h.e.label, (h.dist/1000).toFixed(0) + ' KM · BRG ' + String(Math.round(bearing(t.lat, t.lon, h.e.lat, h.e.lon))).padStart(3,'0') + '°', '#4de3ff', {});
+        const le = viewer.entities.getById(lid);
+        if (!le) viewer.entities.add({ id: lid, position: mid, polyline: { positions: [pos, p2], width: 1.2, material: Cesium.Color.fromCssColorString('#4de3ff').withAlpha(.55) }, billboard: { image: card, scale: .42, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, disableDepthTestDistance: Number.POSITIVE_INFINITY } });
+        else { le.position = mid; le.polyline.positions = [pos, p2]; le.billboard.image = card; }
+      });
       if (t.trail && t.trail.length >= 4) {
         const tr = viewer.entities.getById('trail'); const ps = Cesium.Cartesian3.fromDegreesArray(t.trail);
         if (!tr) viewer.entities.add({ id:'trail', polyline:{ positions: ps, width: 2, material: new Cesium.PolylineGlowMaterialProperty({ glowPower: .25, color: Cesium.Color.fromCssColorString('#ff3b30') }), clampToGround: t.kind === 'ship' } });
@@ -993,13 +1088,14 @@ window.GE = (() => {
       }
     } else if (cockpit) setCockpit(false);
     for (const ent of viewer.entities.values.slice()) { if (!keep.has(ent.id)) viewer.entities.remove(ent); }
+    try { renderCtx(d); } catch(e) {}
     const cts = d.counts || {}; $('nac').textContent = cts.ac||0; $('nsh').textContent = cts.sh||0; $('nsat').textContent = cts.sat||0; $('ncam').textContent = cts.cam||0;
     $('orb').textContent = d.orb||0; $('pass').textContent = String(d.pass||0).padStart(4,'0'); $('dens').textContent = (d.entities||[]).length;
     $('ctx').textContent = (d.track && d.track.label) ? ('TRACK ' + d.track.label.toUpperCase()) : (d.selected && d.selected.title ? d.selected.title.toUpperCase() : (sensor.toUpperCase() + ' · GLOBAL SECTOR'));
     viewer.scene.requestRender();
   }
 
-  return { init, setBasemap, setTerrain, setBuildings, loadAssets, setView, setData, home, tilt, setCustomRaster, setCustomTilesets, setSensor, setHUD, setCockpit, setTool, clearTools, setShadows };
+  return { init, setBasemap, setTerrain, setBuildings, loadAssets, setView, setData, home, tilt, setCustomRaster, setCustomTilesets, setSensor, setHUD, setCockpit, setTool, clearTools, setShadows, focus };
 })();
 window.addEventListener('load', () => post({type:'ready'}));
 window.addEventListener('error', (e) => post({type:'status', text: 'JS: ' + e.message}));
