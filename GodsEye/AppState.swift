@@ -62,7 +62,6 @@ final class AppState: ObservableObject {
             if layers.contains(.space) { Task { await refreshSpace() } }
             if layers.contains(.scanner) && scanners.isEmpty { Task { await refreshScanners() } }
             if layers.contains(.peaks) { Task { await refreshPeaks() } }
-            if layers.contains(.residential) != oldValue.contains(.residential) { handleResidentialLayerChange() }
         }
     }
     @Published var contacts: [Contact] = [] { didSet { rebuildDisplay(); trackTick(fromPoll: true) } }
@@ -95,8 +94,6 @@ final class AppState: ObservableObject {
     @Published var hazards: [HazardAlert] = []
     @Published var scanners: [ScannerFeed] = []
     @Published var peaks: [Peak] = []
-    @Published var residentialBlueprints: [ResidentialBlueprint] = []
-    @Published var residentialBlueprintLoadFailed = false
     @Published var space = SpaceWeather()
     @Published var auroraPoints: [AuroraPoint] = []
     @Published var night: [CLLocationCoordinate2D] = []
@@ -213,6 +210,16 @@ final class AppState: ObservableObject {
     @Published var showLabels: Bool { didSet { ud.set(showLabels, forKey: "labels") } }
     @Published var aisKey: String { didSet { ud.set(aisKey, forKey: "aisKey"); if layers.contains(.ships) { connectAIS() } } }
     @Published var firmsKey: String { didSet { ud.set(firmsKey, forKey: "firmsKey"); if layers.contains(.fires) { Task { await refreshFires() } } } }
+
+    // 3D scene (CesiumJS: Esri / OSM / Google Photorealistic 3D / ion assets)
+    @Published var show3D = false
+    @Published var ionToken: String { didSet { ud.set(ionToken, forKey: "ionToken") } }
+    @Published var ionAssets: String { didSet { ud.set(ionAssets, forKey: "ionAssets") } }
+    @Published var basemap: Basemap { didSet { ud.set(basemap.rawValue, forKey: "basemap") } }
+    @Published var sceneTerrain: Bool { didSet { ud.set(sceneTerrain, forKey: "sceneTerrain") } }
+    @Published var sceneBuildings: Bool { didSet { ud.set(sceneBuildings, forKey: "sceneBuildings") } }
+    @Published var sceneEntities: Bool { didSet { ud.set(sceneEntities, forKey: "sceneEntities") } }
+    @Published var sceneLines: Bool { didSet { ud.set(sceneLines, forKey: "sceneLines") } }
     @Published var anthropicKey: String { didSet { ud.set(anthropicKey, forKey: "anthropicKey") } }
     @Published var aiModel: String { didSet { ud.set(aiModel, forKey: "aiModel") } }
     @Published var alertMilitary: Bool { didSet { ud.set(alertMilitary, forKey: "alertMil"); if alertMilitary { Alerts.shared.requestPermission() } } }
@@ -232,9 +239,6 @@ final class AppState: ObservableObject {
     private var geocoder = CLGeocoder()
     private var geocodeTask: Task<Void, Never>?
     private var pendingDeepLink: URL?
-    private var residentialBlueprintBounds: (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)?
-    private var residentialRefreshTask: Task<[ResidentialBlueprint], Error>?
-    private var residentialRefreshGeneration = 0
 
     init() {
         let ud = UserDefaults.standard
@@ -250,6 +254,13 @@ final class AppState: ObservableObject {
         showLabels = ud.object(forKey: "labels") as? Bool ?? true
         aisKey = ud.string(forKey: "aisKey") ?? ""
         firmsKey = ud.string(forKey: "firmsKey") ?? ""
+        ionToken = ud.string(forKey: "ionToken") ?? ""
+        ionAssets = ud.string(forKey: "ionAssets") ?? ""
+        basemap = Basemap(rawValue: ud.string(forKey: "basemap") ?? "") ?? .esriImagery
+        sceneTerrain = ud.object(forKey: "sceneTerrain") as? Bool ?? true
+        sceneBuildings = ud.object(forKey: "sceneBuildings") as? Bool ?? false
+        sceneEntities = ud.object(forKey: "sceneEntities") as? Bool ?? true
+        sceneLines = ud.object(forKey: "sceneLines") as? Bool ?? true
         anthropicKey = ud.string(forKey: "anthropicKey") ?? ""
         aiModel = ud.string(forKey: "aiModel") ?? "claude-sonnet-5"
         alertMilitary = ud.bool(forKey: "alertMil")
@@ -269,87 +280,6 @@ final class AppState: ObservableObject {
         ais.onStatus = { [weak self] st in self?.aisStatus = st }
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
         cctv.cameraLookup = { [weak self] id in self?.cameras.first { $0.id == id } }
-    }
-
-    private func handleResidentialLayerChange() {
-        guard layers.contains(.residential) else {
-            residentialRefreshTask?.cancel()
-            residentialRefreshTask = nil
-            residentialBlueprints = []
-            residentialBlueprintBounds = nil
-            residentialBlueprintLoadFailed = false
-            return
-        }
-        guard distance < 8_000 else { return }
-        Task { await refreshResidentialBlueprints() }
-    }
-
-    private var residentialBlueprintCoverageActive: Bool {
-        guard layers.contains(.residential),
-              let fetchedBounds = residentialBlueprintBounds,
-              let currentBounds = residentialViewportBounds(center: center, distance: distance) else { return false }
-        return residentialBoundsContain(fetchedBounds, currentBounds)
-    }
-
-    var visibleResidentialBlueprints: [ResidentialBlueprint] {
-        residentialBlueprintCoverageActive ? residentialBlueprints : []
-    }
-
-    var residentialBlueprintStatus: String {
-        if distance >= 8_000 { return "zoom in (<8 km)" }
-        if residentialBlueprintCoverageActive {
-            return residentialBlueprints.isEmpty ? "no footprints in view" : "\(residentialBlueprints.count) footprints"
-        }
-        if residentialBlueprintLoadFailed { return "load failed · retry" }
-        return "loading current view…"
-    }
-
-    private func residentialViewportBounds(center: CLLocationCoordinate2D, distance: Double) -> (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)? {
-        guard let span = residentialBlueprintSpan(for: distance) else { return nil }
-        return residentialFetchBounds(center: center, spanDeg: span)
-    }
-
-    private func residentialBlueprintSpan(for distance: Double) -> Double? {
-        guard distance < 8_000 else { return nil }
-        return min(0.018, max(0.006, distance / 550_000))
-    }
-
-    private func residentialFetchBounds(center: CLLocationCoordinate2D, spanDeg: Double) -> (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double) {
-        let latLimit = 85.0511
-        let latSpan = min(0.018, max(0.006, spanDeg))
-        let lonScale = min(3.0, max(1.0, 1 / max(0.35, cos(center.latitude * .pi / 180))))
-        let lonSpan = latSpan * lonScale
-        return (max(-latLimit, center.latitude - latSpan), min(latLimit, center.latitude + latSpan), center.longitude - lonSpan, center.longitude + lonSpan)
-    }
-
-    private func residentialBoundsContain(_ outer: (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double),
-                                          _ inner: (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)) -> Bool {
-        inner.minLat >= outer.minLat
-            && inner.maxLat <= outer.maxLat
-            && residentialLongitudeRangeContains(outerMin: outer.minLon, outerMax: outer.maxLon, innerMin: inner.minLon, innerMax: inner.maxLon)
-    }
-
-    private func residentialLongitudeRangeContains(outerMin: Double, outerMax: Double, innerMin: Double, innerMax: Double) -> Bool {
-        let outerSegments = residentialLongitudeSegments(min: outerMin, max: outerMax)
-        let innerSegments = residentialLongitudeSegments(min: innerMin, max: innerMax)
-        return innerSegments.allSatisfy { inner in
-            outerSegments.contains { outer in inner.0 >= outer.0 && inner.1 <= outer.1 }
-        }
-    }
-
-    private func residentialLongitudeSegments(min: Double, max: Double) -> [(Double, Double)] {
-        if max - min >= 360 { return [(-180, 180)] }
-        let minNorm = normalizedResidentialLongitude(min)
-        let maxNorm = normalizedResidentialLongitude(max)
-        if minNorm <= maxNorm { return [(minNorm, maxNorm)] }
-        return [(minNorm, 180), (-180, maxNorm)]
-    }
-
-    private func normalizedResidentialLongitude(_ lon: Double) -> Double {
-        var value = lon.truncatingRemainder(dividingBy: 360)
-        if value < -180 { value += 360 }
-        if value > 180 { value -= 360 }
-        return value
     }
 
     func neighborCamera(of cam: Camera, forward: Bool) -> Camera? {
@@ -580,60 +510,6 @@ final class AppState: ObservableObject {
         stations = mm + bb
         rebuildDisplay()
     }
-    func refreshResidentialBlueprints() async {
-        guard layers.contains(.residential) else {
-            residentialRefreshTask?.cancel()
-            residentialRefreshTask = nil
-            residentialBlueprints = []
-            residentialBlueprintBounds = nil
-            residentialBlueprintLoadFailed = false
-            return
-        }
-        guard distance < 8_000 else {
-            residentialRefreshTask?.cancel()
-            residentialRefreshTask = nil
-            residentialBlueprints = []
-            residentialBlueprintBounds = nil
-            residentialBlueprintLoadFailed = false
-            return
-        }
-        let requestedCenter = center
-        let requestedDistance = distance
-        guard let span = residentialBlueprintSpan(for: requestedDistance) else { return }
-        let requestedBounds = residentialFetchBounds(center: requestedCenter, spanDeg: span)
-        residentialRefreshTask?.cancel()
-        residentialRefreshGeneration += 1
-        let generation = residentialRefreshGeneration
-        residentialBlueprintLoadFailed = false
-        let task = Task { try await Feeds.shared.residentialBlueprints(center: requestedCenter, spanDeg: span) }
-        residentialRefreshTask = task
-        do {
-            let fetched = try await task.value
-            guard generation == residentialRefreshGeneration else { return }
-            guard layers.contains(.residential) else { return }
-            guard let currentBounds = residentialViewportBounds(center: center, distance: distance),
-                  residentialBoundsContain(requestedBounds, currentBounds) else {
-                residentialRefreshTask = nil
-                residentialBlueprints = []
-                residentialBlueprintBounds = nil
-                await refreshResidentialBlueprints()
-                return
-            }
-            residentialRefreshTask = nil
-            residentialBlueprints = fetched
-            residentialBlueprintBounds = requestedBounds
-            residentialBlueprintLoadFailed = false
-        } catch is CancellationError {
-            if generation == residentialRefreshGeneration { residentialRefreshTask = nil }
-        } catch {
-            if generation != residentialRefreshGeneration { return }
-            residentialRefreshTask = nil
-            residentialBlueprints = []
-            residentialBlueprintBounds = nil
-            residentialBlueprintLoadFailed = true
-            feedErrors += 1
-        }
-    }
     func refreshHazards() async {
         let nn = (try? await Feeds.shared.nwsAlerts()) ?? []
         let cc = (try? await Feeds.shared.calFire()) ?? []
@@ -766,7 +642,6 @@ final class AppState: ObservableObject {
         await refreshContacts(force: true)
         if layers.contains(.military) { await refreshMilitary() }
         if layers.contains(.cctv) { await refreshCameras() }
-        if layers.contains(.residential), distance < 8_000 { await refreshResidentialBlueprints() }
         rebuildDisplay()
         status = "Online"
         location.request()
@@ -934,7 +809,6 @@ final class AppState: ObservableObject {
         if layers.contains(.bikeshare) { await refreshBikes() }
         if layers.contains(.infra) { await refreshInfra() }
         if layers.contains(.airport) { await refreshAirport() }
-        if layers.contains(.residential), distance < 8_000 { await refreshResidentialBlueprints() }
         await refreshContacts(force: true)
         await refreshQuakes()
         await refreshISS()
@@ -1006,7 +880,6 @@ final class AppState: ObservableObject {
                 if layers.contains(.rail) { await refreshRail() }
                 if layers.contains(.stations) { await refreshStations() }
                 if layers.contains(.peaks) { await refreshPeaks() }
-                if layers.contains(.residential), distance < 8_000 { await refreshResidentialBlueprints() }
             }
         }
         rebuildRadar()

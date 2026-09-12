@@ -114,6 +114,9 @@ struct GlobeView: View {
         .fullScreenCover(item: $s.liveCamera) { cam in
             CameraLiveView(rec: s.cctv, camera: cam).environmentObject(s)
         }
+        .fullScreenCover(isPresented: $s.show3D) {
+            Scene3DView().environmentObject(s)
+        }
     }
 
     // MARK: Map
@@ -286,15 +289,6 @@ struct GlobeView: View {
                 case .apron: MapPolygon(coordinates: f.points).foregroundStyle(Color.gray.opacity(0.18)).stroke(Color.gray.opacity(0.5), lineWidth: 1)
                 case .terminal: MapPolygon(coordinates: f.points).foregroundStyle(Color.cyan.opacity(0.15)).stroke(Color.cyan.opacity(0.6), lineWidth: 1)
                 }
-            }
-        }
-
-        // Residential building blueprints
-        if s.layers.contains(.residential), s.distance < 8_000 {
-            ForEach(s.visibleResidentialBlueprints) { building in
-                MapPolygon(coordinates: building.points)
-                    .foregroundStyle(building.kind.fill)
-                    .stroke(building.kind.stroke, lineWidth: building.kind == .apartments ? 1.6 : 1.1)
             }
         }
 
@@ -838,6 +832,7 @@ struct BottomPanel: View {
                 }
                 HoldAction(icon: "camera.aperture", title: "Modes", active: s.sensor != .normal || s.hud || s.detection, primary: { showModes = true }) {
                     Button { showModes = true } label: { Label("Modes sheet", systemImage: "camera.aperture") }
+                    Button { s.show3D = true } label: { Label("3D scene", systemImage: "cube.transparent") }
                     Picker("Sensor", selection: $s.sensor) {
                         ForEach(SensorMode.allCases) { m in Text(m.title).tag(m) }
                     }
@@ -856,6 +851,7 @@ struct BottomPanel: View {
                 }
                 HoldAction(icon: "square.3.layers.3d", title: "Layers", active: s.layers.contains(.radar) || s.layers.contains(.space), primary: { showLayers = true }) {
                     Button { showLayers = true } label: { Label("Layers sheet", systemImage: "square.3.layers.3d") }
+                    Button { s.show3D = true } label: { Label("3D scene · Esri / Google / OSM", systemImage: "cube.transparent") }
                     if !s.propertyLines.isEmpty {
                         Button(role: .destructive) { s.propertyLines = [] } label: { Label("Clear property lines", systemImage: "rectangle.dashed") }
                     }
@@ -1301,7 +1297,6 @@ struct LayersSheet: View {
         case .space: return "Kp \(String(format: "%.1f", s.space.kp)) · \(s.space.stormLevel)"
         case .scanner: return "\(s.scanners.count) feeds"
         case .peaks: return s.peaks.isEmpty ? "zoom in (<300 km)" : "\(s.peaks.count) peaks"
-        case .residential: return s.residentialBlueprintStatus
         }
     }
 }

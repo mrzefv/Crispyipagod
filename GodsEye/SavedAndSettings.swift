@@ -109,6 +109,19 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Picker("Default basemap", selection: $s.basemap) { ForEach(Basemap.allCases) { Text($0.title).tag($0) } }
+                    SecureField("Cesium ion access token", text: $s.ionToken).font(.system(.body, design: .monospaced)).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    TextField("Extra ion asset IDs (comma-separated)", text: $s.ionAssets).font(.system(.body, design: .monospaced)).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.numbersAndPunctuation)
+                    Toggle("World Terrain", isOn: $s.sceneTerrain)
+                    Toggle("OSM Buildings", isOn: $s.sceneBuildings)
+                    Toggle("Live contacts in scene", isOn: $s.sceneEntities)
+                    Toggle("Property lines in scene", isOn: $s.sceneLines)
+                    Button("Open 3D scene") { s.show3D = true }
+                } header: { Text("3D Scene — Esri · OSM · Google 3D · ion") } footer: {
+                    Text("Esri World Imagery and OSM need no key. Google Photorealistic 3D Tiles, Bing, World Terrain, OSM Buildings and your own ion-hosted tilesets need a free Cesium ion token (ion.cesium.com). Stays on-device.")
+                }
+
+                Section {
                     SecureField("NASA FIRMS map key", text: $s.firmsKey).font(.system(.body, design: .monospaced)).textInputAutocapitalization(.never).autocorrectionDisabled()
                     LabeledContent("Fires loaded", value: "\(s.fires.count)")
                 } header: { Text("Power up — Active Fires") } footer: { Text("Free at firms.modaps.eosdis.nasa.gov/api/map_key. VIIRS SNPP, trailing 24h, fetched around the view.") }
