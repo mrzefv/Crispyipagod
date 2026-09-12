@@ -359,12 +359,13 @@ final class Feeds {
     }
 
     func residentialBlueprints(center c: CLLocationCoordinate2D, spanDeg: Double) async throws -> [ResidentialBlueprint] {
+        let latLimit = 85.0511
         let s = max(0.006, min(spanDeg, 0.018))
         let posix = Locale(identifier: "en_US_POSIX")
         let lonScale = min(3.0, max(1.0, 1 / max(0.35, cos(c.latitude * .pi / 180))))
         let lonSpan = s * lonScale
-        let latMin = max(-90, c.latitude - s)
-        let latMax = min(90, c.latitude + s)
+        let latMin = max(-latLimit, c.latitude - s)
+        let latMax = min(latLimit, c.latitude + s)
         let rawLonMin = c.longitude - lonSpan
         let rawLonMax = c.longitude + lonSpan
         let lonBoxes: [(Double, Double)] = {

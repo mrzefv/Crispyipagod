@@ -96,6 +96,7 @@ final class AppState: ObservableObject {
     @Published var scanners: [ScannerFeed] = []
     @Published var peaks: [Peak] = []
     @Published var residentialBlueprints: [ResidentialBlueprint] = []
+    @Published var residentialBlueprintLoadFailed = false
     @Published var space = SpaceWeather()
     @Published var auroraPoints: [AuroraPoint] = []
     @Published var night: [CLLocationCoordinate2D] = []
@@ -271,6 +272,7 @@ final class AppState: ObservableObject {
         guard layers.contains(.residential) else {
             residentialBlueprints = []
             residentialBlueprintBounds = nil
+            residentialBlueprintLoadFailed = false
             return
         }
         guard distance < 8_000 else { return }
@@ -293,6 +295,7 @@ final class AppState: ObservableObject {
         if residentialBlueprintCoverageActive {
             return residentialBlueprints.isEmpty ? "no footprints in view" : "\(residentialBlueprints.count) footprints"
         }
+        if residentialBlueprintLoadFailed { return "load failed · retry" }
         return "loading current view…"
     }
 
@@ -307,10 +310,11 @@ final class AppState: ObservableObject {
     }
 
     private func residentialFetchBounds(center: CLLocationCoordinate2D, spanDeg: Double) -> (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double) {
+        let latLimit = 85.0511
         let latSpan = min(0.018, max(0.006, spanDeg))
         let lonScale = min(3.0, max(1.0, 1 / max(0.35, cos(center.latitude * .pi / 180))))
         let lonSpan = latSpan * lonScale
-        return (max(-90, center.latitude - latSpan), min(90, center.latitude + latSpan), center.longitude - lonSpan, center.longitude + lonSpan)
+        return (max(-latLimit, center.latitude - latSpan), min(latLimit, center.latitude + latSpan), center.longitude - lonSpan, center.longitude + lonSpan)
     }
 
     private func residentialBoundsContain(_ outer: (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double),
@@ -570,17 +574,20 @@ final class AppState: ObservableObject {
         guard layers.contains(.residential) else {
             residentialBlueprints = []
             residentialBlueprintBounds = nil
+            residentialBlueprintLoadFailed = false
             return
         }
         guard distance < 8_000 else {
             residentialBlueprints = []
             residentialBlueprintBounds = nil
+            residentialBlueprintLoadFailed = false
             return
         }
         let requestedCenter = center
         let requestedDistance = distance
         guard let span = residentialBlueprintSpan(for: requestedDistance) else { return }
         let requestedBounds = residentialFetchBounds(center: requestedCenter, spanDeg: span)
+        residentialBlueprintLoadFailed = false
         do {
             let fetched = try await Feeds.shared.residentialBlueprints(center: requestedCenter, spanDeg: span)
             guard layers.contains(.residential),
@@ -588,9 +595,11 @@ final class AppState: ObservableObject {
                   residentialBoundsContain(requestedBounds, currentBounds) else { return }
             residentialBlueprints = fetched
             residentialBlueprintBounds = requestedBounds
+            residentialBlueprintLoadFailed = false
         } catch {
             residentialBlueprints = []
             residentialBlueprintBounds = nil
+            residentialBlueprintLoadFailed = true
             feedErrors += 1
         }
     }
