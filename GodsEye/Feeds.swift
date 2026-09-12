@@ -429,23 +429,32 @@ final class Feeds {
         let enc = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
         let rawLeftLon = center.longitude - 1.2
         let rawRightLon = center.longitude + 1.2
-        let leftLon = max(-180, rawLeftLon)
-        let rightLon = min(180, rawRightLon)
         let topLat = min(90, center.latitude + 1.0)
         let bottomLat = max(-90, center.latitude - 1.0)
-        let viewbox = String(format: "%.5f,%.5f,%.5f,%.5f", leftLon, topLat, rightLon, bottomLat)
         let key = q.lowercased()
             .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
             .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
         let latKey = String(format: "%.2f", center.latitude)
         let lonKey = String(format: "%.2f", center.longitude)
         let cacheKey = "parcel-\(String(key.prefix(40)).ifEmpty("search"))-\(latKey)-\(lonKey).json"
-        let hasAntiMeridianWrap = rawLeftLon < -180 || rawRightLon > 180
-        let url = "https://nominatim.openstreetmap.org/search?q=\(enc)&format=jsonv2&addressdetails=1&extratags=1&limit=\(max(1, min(limit, 30)))" +
-            (hasAntiMeridianWrap ? "" : "&viewbox=\(viewbox)&bounded=1")
-        let d = try await fetch(url, cache: cacheKey)
-        guard let arr = try JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { throw FeedError.badResponse }
-        return arr.compactMap { row in
+        let base = "https://nominatim.openstreetmap.org/search?q=\(enc)&format=jsonv2&addressdetails=1&extratags=1&limit=\(max(1, min(limit, 30)))"
+        let boxes: [(name: String, left: Double, right: Double)] = {
+            if rawLeftLon < -180 {
+                return [
+                    ("w", -180, min(180, rawRightLon)),
+                    ("e", max(-180, rawLeftLon + 360), 180)
+                ]
+            }
+            if rawRightLon > 180 {
+                return [
+                    ("e", max(-180, rawLeftLon), 180),
+                    ("w", -180, min(180, rawRightLon - 360))
+                ]
+            }
+            return [("c", max(-180, rawLeftLon), min(180, rawRightLon))]
+        }()
+        func parse(_ rows: [[String: Any]]) -> [ParcelRecord] {
+            rows.compactMap { row in
             guard let la = row["lat"] as? String, let lo = row["lon"] as? String,
                   let lat = Double(la), let lon = Double(lo) else { return nil }
             let display = row["display_name"] as? String ?? "Unknown address"
@@ -469,8 +478,20 @@ final class Feeds {
                 lon: lon
             )
         }
-        .prefix(limit)
-        .map { $0 }
+        }
+        var out: [ParcelRecord] = []
+        var seen = Set<String>()
+        for (idx, box) in boxes.enumerated() {
+            let viewbox = String(format: "%.5f,%.5f,%.5f,%.5f", box.left, topLat, box.right, bottomLat)
+            let d = try await fetch(base + "&viewbox=\(viewbox)&bounded=1", cache: "\(cacheKey)-\(box.name)-\(idx)")
+            guard let arr = try JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { continue }
+            for r in parse(arr) where !seen.contains(r.id) {
+                seen.insert(r.id)
+                out.append(r)
+                if out.count >= limit { return out }
+            }
+        }
+        return out
     }
 
     // MARK: Anthropic HUD summary (user key)

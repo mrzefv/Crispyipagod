@@ -955,15 +955,17 @@ struct SearchSheet: View {
 
     private func schedule(_ q: String) {
         searchTask?.cancel()
-        let trimmed = q.trimmingCharacters(in: .whitespaces)
+        let trimmed = q.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count >= 2 else { places = []; parcels = []; searching = false; activeSearchID = nil; return }
         let originCenter = s.center
         let searchID = UUID()
         activeSearchID = searchID
         searching = true
-        searchTask = Task { @MainActor in
+        searchTask = Task {
             defer {
-                if activeSearchID == searchID { searching = false }
+                Task { @MainActor in
+                    if activeSearchID == searchID { searching = false }
+                }
             }
             try? await Task.sleep(nanoseconds: 350_000_000)
             guard !Task.isCancelled else { return }
@@ -976,9 +978,12 @@ struct SearchSheet: View {
             let resp = await placeResp
             let parcel = await parcelResp
             guard !Task.isCancelled else { return }
-            guard activeSearchID == searchID else { return }
-            places = Array((resp?.mapItems ?? []).prefix(12))
-            parcels = Array((parcel ?? []).prefix(10))
+            let shouldApply = await MainActor.run { activeSearchID == searchID }
+            guard shouldApply else { return }
+            await MainActor.run {
+                places = Array((resp?.mapItems ?? []).prefix(12))
+                parcels = Array((parcel ?? []).prefix(10))
+            }
         }
     }
 
