@@ -261,7 +261,6 @@ select {
   transition: transform 180ms ease;
 }
 
-.detail-sheet:hover,
 .detail-sheet:focus-within,
 .detail-sheet--expanded {
   transform: translateY(0);

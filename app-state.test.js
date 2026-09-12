@@ -17,6 +17,7 @@ import {
   toggleBookmark,
   toggleDetailExpanded,
   togglePlayback,
+  updateSetting,
 } from "./app-state.js";
 
 test("splash transitions to home when loading finishes", () => {
@@ -93,4 +94,12 @@ test("layers control cycles through supported map styles", () => {
   assert.equal(first.mapStyle, "Terrain");
   assert.equal(second.mapStyle, "Signal");
   assert.equal(third.mapStyle, "Globe");
+});
+
+test("settings updates only supported keys", () => {
+  const updated = updateSetting(createInitialState(), "mapStyle", "Signal");
+  const ignored = updateSetting(updated, "screen", "timeline");
+
+  assert.equal(updated.mapStyle, "Signal");
+  assert.equal(ignored.screen, "splash");
 });

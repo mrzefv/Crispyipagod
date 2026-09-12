@@ -20,6 +20,7 @@ import {
 } from "./app-state.js";
 
 const app = document.querySelector("#app");
+const quickFocusLocationId = "andes-array";
 let state = createInitialState();
 let playbackTimer;
 
@@ -89,7 +90,6 @@ function renderTopBar(selectedLocation) {
         <span>Search</span>
         <input
           type="search"
-          value="${state.searchQuery}"
           placeholder="Search regions or coordinates"
           data-role="search"
         />
@@ -124,7 +124,7 @@ function renderBottomPanel(selectedLocation) {
         <p>${selectedLocation.coordinates}</p>
       </div>
       <div class="quick-actions">
-        <button data-action="select-location" data-location-id="${locations[1].id}">Focus Andes</button>
+        <button data-action="select-location" data-location-id="${quickFocusLocationId}">Focus Andes</button>
         <button data-action="open-timeline">Timeline</button>
       </div>
     </section>
@@ -354,6 +354,10 @@ function render() {
         : renderHome();
 
   app.innerHTML = current;
+  const searchInput = app.querySelector("[data-role='search']");
+  if (searchInput) {
+    searchInput.value = state.searchQuery;
+  }
 
   if (state.isPlaying && state.screen === "timeline") {
     startPlayback();

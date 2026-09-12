@@ -47,6 +47,8 @@ export const timelineEvents = [
   { id: "evt-4", label: "Signal handoff", time: 90 },
 ];
 
+const settingKeys = new Set(["theme", "mapStyle", "performanceMode", "cacheMode"]);
+
 export function createInitialState() {
   return {
     screen: "splash",
@@ -190,6 +192,10 @@ export function jumpToEvent(state, direction) {
 }
 
 export function updateSetting(state, setting, value) {
+  if (!settingKeys.has(setting)) {
+    return state;
+  }
+
   return {
     ...state,
     [setting]: value,
