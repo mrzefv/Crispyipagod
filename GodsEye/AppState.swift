@@ -520,7 +520,9 @@ final class AppState: ObservableObject {
             lon: qv("slon").flatMap(Double.init)
         )
         pendingSelectionResolveAttempts = 0
-        resolvePendingDeepLinkSelection()
+        if pendingSharedView == nil {
+            resolvePendingDeepLinkSelection()
+        }
     }
 
     private func resolvePendingDeepLinkSelection() {
@@ -584,10 +586,13 @@ final class AppState: ObservableObject {
             fly(to: center, distance: max(3_000, min(dist, AppState.globeDistance)))
         }
         pendingSharedView = nil
+        resolvePendingDeepLinkSelection()
     }
 
     func dismissPendingSharedView() {
         pendingSharedView = nil
+        pendingDeepLinkSelection = nil
+        pendingSelectionResolveAttempts = 0
     }
 
     func entity(forBookmark b: Bookmark) -> Entity {

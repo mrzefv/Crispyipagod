@@ -14,7 +14,7 @@ Target: iOS 17+. Bundle id `party.mrvek.godseye`.
 
 ## Screens
 
-- **Splash** — animated globe, status line, auto-transitions when feeds are primed.
+- **Splash** — animated globe, status line, auto-transitions when feeds (including orbital tracks) are primed.
 - **Home** — MapKit 3D globe (imagery / hybrid / standard + optional traffic), top bar Search · Layers · Missions · Time, bottom panel (center name, coords, LIVE/REPLAY, counts, quick actions). Tap any marker or empty ground for details.
 - **Detail sheet** — half-sheet, expandable to full: title, coords, summary, metadata, Save / Timeline / Share, source link, open in Maps.
 - **Timeline** — −24h → +72h scrubber, play/pause, event markers (M4.5+ quakes, launches), prev/next jump, GO LIVE. Time state persists on the globe.

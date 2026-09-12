@@ -107,27 +107,36 @@ final class Feeds {
     }
 
     func satellites() async throws -> [SatPos] {
-        var out: [SatPos] = []
-        for sat in satelliteCatalog {
-            let cache = "sat-\(sat.id).json"
-            do {
-                let d = try await fetch("https://api.wheretheiss.at/v1/satellites/\(sat.id)", cache: cache)
-                let r = try JSONDecoder().decode(ISSResponse.self, from: d)
-                out.append(SatPos(
-                    id: sat.id,
-                    name: r.name.isEmpty ? sat.name : r.name,
-                    lat: r.latitude,
-                    lon: r.longitude,
-                    altKm: r.altitude,
-                    velocityKmh: r.velocity,
-                    time: Date(timeIntervalSince1970: r.timestamp),
-                    source: "wheretheiss.at"
-                ))
-            } catch {
-                if sat.id == "25544", let iss = try? await iss() {
-                    out.append(iss)
+        var out = await withTaskGroup(of: SatPos?.self, returning: [SatPos].self) { group in
+            for sat in satelliteCatalog {
+                group.addTask {
+                    let cache = "sat-\(sat.id).json"
+                    do {
+                        let d = try await self.fetch("https://api.wheretheiss.at/v1/satellites/\(sat.id)", cache: cache)
+                        let r = try JSONDecoder().decode(ISSResponse.self, from: d)
+                        return SatPos(
+                            id: sat.id,
+                            name: r.name.isEmpty ? sat.name : r.name,
+                            lat: r.latitude,
+                            lon: r.longitude,
+                            altKm: r.altitude,
+                            velocityKmh: r.velocity,
+                            time: Date(timeIntervalSince1970: r.timestamp),
+                            source: "wheretheiss.at"
+                        )
+                    } catch {
+                        return nil
+                    }
                 }
             }
+            var sats: [SatPos] = []
+            for await sat in group {
+                if let sat { sats.append(sat) }
+            }
+            return sats
+        }
+        if out.isEmpty, let iss = try? await iss() {
+            out = [iss]
         }
         guard !out.isEmpty else { throw FeedError.badResponse }
         return out
