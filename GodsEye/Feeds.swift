@@ -427,10 +427,10 @@ final class Feeds {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard q.count >= 2 else { return [] }
         let enc = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
-        let leftLon = center.longitude - 1.2
-        let rightLon = center.longitude + 1.2
-        let topLat = center.latitude + 1.0
-        let bottomLat = center.latitude - 1.0
+        let leftLon = max(-180, center.longitude - 1.2)
+        let rightLon = min(180, center.longitude + 1.2)
+        let topLat = min(90, center.latitude + 1.0)
+        let bottomLat = max(-90, center.latitude - 1.0)
         let viewbox = String(format: "%.5f,%.5f,%.5f,%.5f", leftLon, topLat, rightLon, bottomLat)
         let key = q.lowercased()
             .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
