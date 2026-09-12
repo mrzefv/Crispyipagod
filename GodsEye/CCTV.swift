@@ -55,9 +55,9 @@ final class CamRecorder {
             captureToken = nil
         }
         refreshMetrics()
-        guard timer == nil, !watching.isEmpty else { return }
-        installTimer()
-        scheduleCapture()
+        guard !watching.isEmpty else { return }
+        if timer == nil { installTimer() }
+        if captureTask == nil { scheduleCapture() }
     }
 
     func stop() {
@@ -201,9 +201,12 @@ final class CamRecorder {
     }
 
     private func cacheBustedURL(from string: String) -> URL? {
-        let stamp = String(Int(Date().timeIntervalSince1970 / 6))
-        let separator = string.contains("?") ? "&" : "?"
-        return URL(string: "\(string)\(separator)t=\(stamp)")
+        guard var components = URLComponents(string: string) else { return URL(string: string) }
+        var items = components.queryItems ?? []
+        items.removeAll { $0.name == "t" }
+        items.append(URLQueryItem(name: "t", value: String(Int(Date().timeIntervalSince1970 / 6))))
+        components.queryItems = items
+        return components.url
     }
 }
 
