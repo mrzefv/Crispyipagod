@@ -107,20 +107,35 @@ final class CamRecorder {
     }
 
     private func captureWatched() async {
-        for id in watching.sorted() {
-            guard !Task.isCancelled else { return }
+        let requests = watching.sorted().compactMap { id -> (String, URL)? in
             guard let cam = cameraLookup?(id),
-                  let url = cacheBustedURL(from: cam.imageURL) else { continue }
-            do {
-                let (data, response) = try await URLSession.shared.data(from: url)
-                guard let http = response as? HTTPURLResponse,
-                      (200..<300).contains(http.statusCode),
-                      let mime = http.mimeType?.lowercased(),
-                      mime.hasPrefix("image/") else { continue }
-                saveFrame(data, for: id)
-            } catch {
-                continue
+                  let url = cacheBustedURL(from: cam.imageURL) else { return nil }
+            return (id, url)
+        }
+        let results = await withTaskGroup(of: (String, Data?).self, returning: [(String, Data)].self) { group in
+            for (id, url) in requests {
+                group.addTask {
+                    do {
+                        let (data, response) = try await URLSession.shared.data(from: url)
+                        guard let http = response as? HTTPURLResponse,
+                              (200..<300).contains(http.statusCode),
+                              let mime = http.mimeType?.lowercased(),
+                              mime.hasPrefix("image/") else { return (id, nil) }
+                        return (id, data)
+                    } catch {
+                        return (id, nil)
+                    }
+                }
             }
+            var output: [(String, Data)] = []
+            for await (id, data) in group {
+                if let data { output.append((id, data)) }
+            }
+            return output
+        }
+        for (id, data) in results {
+            guard !Task.isCancelled else { return }
+            saveFrame(data, for: id)
         }
         refreshMetrics()
     }
@@ -145,8 +160,9 @@ final class CamRecorder {
         var counts: [String: Int] = [:]
         var totalBytes: Int64 = 0
         let root = rootURL
-        if let dirs = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil) {
-            for dir in dirs where dir.hasDirectoryPath {
+        if let dirs = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.isDirectoryKey]) {
+            for dir in dirs {
+                guard (try? dir.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true else { continue }
                 let frames = frameURLs(in: dir)
                 counts[dir.lastPathComponent] = frames.count
                 for frame in frames {
@@ -159,7 +175,7 @@ final class CamRecorder {
     }
 
     private func frameURLs(in dir: URL) -> [URL] {
-        (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles]))?
+        (try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey], options: [.skipsHiddenFiles]))?
             .filter { ["jpg", "jpeg", "png"].contains($0.pathExtension.lowercased()) }
             .sorted {
                 let lhs = (try? $0.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
@@ -180,12 +196,9 @@ final class CamRecorder {
     }
 
     private func cacheBustedURL(from string: String) -> URL? {
-        guard var components = URLComponents(string: string) else { return URL(string: string) }
-        var items = components.queryItems ?? []
-        items.removeAll { $0.name == "t" }
-        items.append(URLQueryItem(name: "t", value: String(Int(Date().timeIntervalSince1970 / 6))))
-        components.queryItems = items
-        return components.url
+        let stamp = String(Int(Date().timeIntervalSince1970 / 6))
+        let separator = string.contains("?") ? "&" : "?"
+        return URL(string: "\(string)\(separator)t=\(stamp)")
     }
 }
 
