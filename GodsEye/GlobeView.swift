@@ -1297,6 +1297,7 @@ struct LayersSheet: View {
         case .space: return "Kp \(String(format: "%.1f", s.space.kp)) · \(s.space.stormLevel)"
         case .scanner: return "\(s.scanners.count) feeds"
         case .peaks: return s.peaks.isEmpty ? "zoom in (<300 km)" : "\(s.peaks.count) peaks"
+        case .residential: return "public OSM footprints"
         }
     }
 }
