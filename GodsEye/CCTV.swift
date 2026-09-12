@@ -1,5 +1,6 @@
 import SwiftUI
 import AVKit
+import CryptoKit
 
 @MainActor
 final class CamRecorder {
@@ -29,6 +30,7 @@ final class CamRecorder {
     private let intervalKey = "cctvIntervalSeconds"
     private var timer: Timer?
     private var captureTask: Task<Void, Never>?
+    private var lastFrameDigests: [String: String] = [:]
     private let maxFramesPerCamera = 400
 
     init() {
@@ -100,10 +102,11 @@ final class CamRecorder {
     private func saveFrame(_ data: Data, for id: String) {
         let dir = cameraDirectory(for: id)
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
-        let frames = frameURLs(in: dir)
-        if let last = frames.last, let lastData = try? Data(contentsOf: last), lastData == data { return }
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        if lastFrameDigests[id] == digest { return }
         let url = dir.appendingPathComponent("\(Int(Date().timeIntervalSince1970 * 1000)).jpg")
         try? data.write(to: url, options: .atomic)
+        lastFrameDigests[id] = digest
         let updated = frameURLs(in: dir)
         if updated.count > maxFramesPerCamera {
             for extra in updated.prefix(updated.count - maxFramesPerCamera) {
