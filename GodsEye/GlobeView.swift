@@ -172,7 +172,9 @@ struct GlobeView: View {
             HStack {
                 if s.detectionOverlay {
                     Text("DETECT \(s.visibleContacts.count) AC · \(s.visibleSatellites.count) SAT · \(s.visibleCameras.count) CAM")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .font(.caption.monospaced().bold())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                         .padding(.horizontal, 8).padding(.vertical, 5)
                         .background(.black.opacity(0.55), in: Capsule())
                         .overlay(Capsule().stroke(s.accent.opacity(0.6), lineWidth: 0.8))
@@ -180,8 +182,9 @@ struct GlobeView: View {
                 Spacer()
                 if s.tacticalHUD, let t = s.trackedEntity {
                     Text("TRACK \(t.title.prefix(12)) · \(Fmt.coord(t.lat, t.lon))")
-                        .font(.system(size: 10, weight: .bold, design: .monospaced))
+                        .font(.caption.monospaced().bold())
                         .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                         .padding(.horizontal, 8).padding(.vertical, 5)
                         .background(.black.opacity(0.55), in: Capsule())
                         .overlay(Capsule().stroke(.orange.opacity(0.7), lineWidth: 0.8))

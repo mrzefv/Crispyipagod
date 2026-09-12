@@ -73,6 +73,7 @@ final class AppState: ObservableObject {
     private var lastContactFetchCenter: CLLocationCoordinate2D?
     private var geocoder = CLGeocoder()
     private var geocodeTask: Task<Void, Never>?
+    private var pendingDeepLinkSelection: (sel: String?, title: String?, lat: Double?, lon: Double?)?
 
     init() {
         let ud = UserDefaults.standard
@@ -226,6 +227,7 @@ final class AppState: ObservableObject {
         status = "Listening for transponders…"
         await refreshContacts(force: true)
         if layers.contains(.military) { await refreshMilitary() }
+        resolvePendingDeepLinkSelection()
         rebuildDisplay()
         status = "Online"
         location.request()
@@ -264,11 +266,12 @@ final class AppState: ObservableObject {
             contacts = list
             lastContactFetchCenter = c
             lastUpdate = Date()
+            resolvePendingDeepLinkSelection()
         } catch { feedErrors += 1 }
     }
 
     func refreshMilitary() async {
-        do { militaryContacts = try await Feeds.shared.military() } catch { feedErrors += 1 }
+        do { militaryContacts = try await Feeds.shared.military(); resolvePendingDeepLinkSelection() } catch { feedErrors += 1 }
     }
 
     func refreshQuakes() async {
@@ -276,11 +279,11 @@ final class AppState: ObservableObject {
     }
 
     func refreshSatellites() async {
-        do { satellites = try await Feeds.shared.satellites() } catch { feedErrors += 1 }
+        do { satellites = try await Feeds.shared.satellites(); resolvePendingDeepLinkSelection() } catch { feedErrors += 1 }
     }
 
     func refreshLaunches() async {
-        do { launches = try await Feeds.shared.launches() } catch { feedErrors += 1 }
+        do { launches = try await Feeds.shared.launches(); resolvePendingDeepLinkSelection() } catch { feedErrors += 1 }
     }
 
     func refreshAll() async {
@@ -415,6 +418,8 @@ final class AppState: ObservableObject {
     }
 
     func applyMission(_ m: MissionPreset) {
+        trackedEntityId = nil
+        trackTrail = []
         switch m {
         case .liveContacts:
             layers = [.flights, .military, .satellites, .cameras]
@@ -470,31 +475,45 @@ final class AppState: ObservableObject {
            let dist = qv("dist").flatMap(Double.init) {
             fly(to: .init(latitude: la, longitude: lo), distance: max(3_000, min(dist, AppState.globeDistance)))
         }
-        if let sel = qv("sel") {
+        pendingDeepLinkSelection = (
+            sel: qv("sel"),
+            title: qv("title"),
+            lat: qv("slat").flatMap(Double.init),
+            lon: qv("slon").flatMap(Double.init)
+        )
+        resolvePendingDeepLinkSelection()
+    }
+
+    private func resolvePendingDeepLinkSelection() {
+        guard let pending = pendingDeepLinkSelection else { return }
+        if let sel = pending.sel {
             if sel.hasPrefix("ac-"),
                let c = (contacts + militaryContacts).first(where: { "ac-\($0.id)" == sel }) {
                 selected = Entity.from(c)
+                pendingDeepLinkSelection = nil
                 return
             }
             if sel.hasPrefix("sat-"),
                let sat = satellites.first(where: { "sat-\($0.id)" == sel }) {
                 selected = Entity.from(sat)
+                pendingDeepLinkSelection = nil
                 return
             }
             if sel.hasPrefix("ll-"),
                let l = launches.first(where: { "ll-\($0.id)" == sel }) {
                 selected = Entity.from(l)
+                pendingDeepLinkSelection = nil
                 return
             }
             if let cam = cameras.first(where: { $0.id == sel }) {
                 selected = Entity.from(cam)
+                pendingDeepLinkSelection = nil
                 return
             }
         }
-        if let title = qv("title"),
-           let la = qv("slat").flatMap(Double.init),
-           let lo = qv("slon").flatMap(Double.init) {
+        if let title = pending.title, let la = pending.lat, let lo = pending.lon {
             selected = Entity.place(lat: la, lon: lo, name: title, detail: "Shared target", distance: 20_000)
+            pendingDeepLinkSelection = nil
         }
     }
 
