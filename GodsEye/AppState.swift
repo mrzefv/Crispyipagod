@@ -299,8 +299,17 @@ final class AppState: ObservableObject {
     }
 
     private func residentialViewportBounds(center: CLLocationCoordinate2D, distance: Double) -> (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)? {
+        guard let span = residentialBlueprintSpan(for: distance) else { return nil }
+        return residentialFetchBounds(center: center, spanDeg: span)
+    }
+
+    private func residentialBlueprintSpan(for distance: Double) -> Double? {
         guard distance < 8_000 else { return nil }
-        let latSpan = min(0.018, max(0.006, distance / 550_000))
+        return min(0.018, max(0.006, distance / 550_000))
+    }
+
+    private func residentialFetchBounds(center: CLLocationCoordinate2D, spanDeg: Double) -> (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double) {
+        let latSpan = min(0.018, max(0.006, spanDeg))
         let lonScale = min(3.0, max(1.0, 1 / max(0.35, cos(center.latitude * .pi / 180))))
         let lonSpan = latSpan * lonScale
         return (center.latitude - latSpan, center.latitude + latSpan, center.longitude - lonSpan, center.longitude + lonSpan)
@@ -539,8 +548,8 @@ final class AppState: ObservableObject {
         guard distance < 8_000 else { return }
         let requestedCenter = center
         let requestedDistance = distance
-        guard let requestedBounds = residentialViewportBounds(center: requestedCenter, distance: requestedDistance) else { return }
-        let span = min(0.018, max(0.006, requestedDistance / 550_000))
+        guard let span = residentialBlueprintSpan(for: requestedDistance) else { return }
+        let requestedBounds = residentialFetchBounds(center: requestedCenter, spanDeg: span)
         do {
             let fetched = try await Feeds.shared.residentialBlueprints(center: requestedCenter, spanDeg: span)
             guard layers.contains(.residential),
