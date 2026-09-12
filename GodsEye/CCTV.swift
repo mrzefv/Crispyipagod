@@ -38,21 +38,21 @@ final class CamRecorder {
         refreshMetrics()
     }
 
-    deinit {
-        timer?.invalidate()
-        captureTask?.cancel()
-    }
-
     func start() {
-        timer?.invalidate()
-        timer = nil
-        captureTask?.cancel()
+        stop()
         refreshMetrics()
         guard !watching.isEmpty else { return }
         timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(intervalSeconds), repeats: true) { [weak self] _ in
             self?.scheduleCapture()
         }
         scheduleCapture()
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        captureTask?.cancel()
+        captureTask = nil
     }
 
     func toggleWatch(_ id: String) {
