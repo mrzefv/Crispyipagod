@@ -590,9 +590,14 @@ final class AppState: ObservableObject {
         residentialBlueprintLoadFailed = false
         do {
             let fetched = try await Feeds.shared.residentialBlueprints(center: requestedCenter, spanDeg: span)
-            guard layers.contains(.residential),
-                  let currentBounds = residentialViewportBounds(center: center, distance: distance),
-                  residentialBoundsContain(requestedBounds, currentBounds) else { return }
+            guard layers.contains(.residential) else { return }
+            guard let currentBounds = residentialViewportBounds(center: center, distance: distance),
+                  residentialBoundsContain(requestedBounds, currentBounds) else {
+                residentialBlueprints = []
+                residentialBlueprintBounds = nil
+                if layers.contains(.residential), distance < 8_000 { Task { await refreshResidentialBlueprints() } }
+                return
+            }
             residentialBlueprints = fetched
             residentialBlueprintBounds = requestedBounds
             residentialBlueprintLoadFailed = false
