@@ -50,6 +50,10 @@ final class CamRecorder {
     }
 
     func resume() {
+        if captureTask?.isCancelled == true {
+            captureTask = nil
+            captureToken = nil
+        }
         refreshMetrics()
         guard timer == nil, !watching.isEmpty else { return }
         installTimer()
@@ -77,6 +81,7 @@ final class CamRecorder {
         lastFrameDigests = [:]
         frameCounts = [:]
         storageBytes = 0
+        if !watching.isEmpty { start() }
     }
 
     private func installTimer() {
@@ -249,7 +254,7 @@ struct CameraLiveView: View {
                 AsyncImage(url: stillURL) { phase in
                     switch phase {
                     case .success(let image):
-                        image.resizable().scaledToFill()
+                        image.resizable().scaledToFit()
                             .accessibilityLabel("Live camera feed for \(camera.name)")
                     case .failure:
                         Label("Camera offline", systemImage: "video.slash")
