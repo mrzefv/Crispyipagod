@@ -919,17 +919,14 @@ struct SearchSheet: View {
                         Text("No places yet — try an airport, city, or landmark.").font(.footnote).foregroundStyle(.secondary)
                     }
                 }
-                if !parcels.isEmpty || (trimmedQuery.count >= 2 && !searching) {
-                    Section("Parcels / owner records") {
+                if !parcels.isEmpty {
+                    Section("Address / owner records") {
                         ForEach(parcels) { p in
                             Button { pickParcel(p) } label: {
                                 row(icon: "building.2.crop.circle", color: .teal,
                                     title: p.title,
                                     sub: [p.owner.map { "Owner: \($0)" }, p.address].compactMap { $0 }.joined(separator: " · "))
                             }
-                        }
-                        if parcels.isEmpty && !searching {
-                            Text("No parcel/owner matches for this query yet.").font(.footnote).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -1016,7 +1013,7 @@ struct SearchSheet: View {
             lon: p.lon,
             time: nil,
             meta: [
-                MetaRow("Parcel ID", p.parcelID),
+                MetaRow("OSM record ID", p.osmRecordID),
                 MetaRow("Address", p.address),
                 MetaRow("Owner", p.owner ?? "—"),
                 MetaRow("Source", "OpenStreetMap Nominatim")

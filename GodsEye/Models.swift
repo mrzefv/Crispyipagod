@@ -1232,7 +1232,7 @@ struct Entity: Identifiable, Equatable {
 
 struct ParcelRecord: Identifiable, Equatable {
     let id: String
-    let parcelID: String
+    let osmRecordID: String
     let title: String
     let address: String
     let owner: String?

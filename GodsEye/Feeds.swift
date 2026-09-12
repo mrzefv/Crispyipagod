@@ -463,14 +463,14 @@ final class Feeds {
             let addr = row["address"] as? [String: Any]
             let osmType = (row["osm_type"] as? String ?? "?").uppercased()
             let osmID = String(describing: row["osm_id"] ?? "")
-            let parcelID = "\(osmType.prefix(1))\(osmID)"
+            let recordID = "\(osmType.prefix(1))\(osmID)"
             let house = (addr?["house_number"] as? String).ifEmpty(name ?? "")
             let road = (addr?["road"] as? String).ifEmpty(addr?["pedestrian"] as? String ?? "")
             let fallbackTitle = [house, road].filter { !$0.isEmpty }.joined(separator: " ")
             let owner = (ext?["owner"] as? String).ifEmpty((ext?["operator"] as? String).ifEmpty(ext?["contact:person"] as? String ?? ""))
             return ParcelRecord(
-                id: parcelID.isEmpty ? "parcel-\(lat)-\(lon)" : parcelID,
-                parcelID: parcelID.ifEmpty("—"),
+                id: recordID.isEmpty ? "parcel-\(lat)-\(lon)" : recordID,
+                osmRecordID: recordID.ifEmpty("—"),
                 title: (name ?? "").ifEmpty(fallbackTitle.ifEmpty(display.components(separatedBy: ",").first?.trimmingCharacters(in: .whitespaces) ?? "Property record")),
                 address: display,
                 owner: owner.isEmpty ? nil : owner,
