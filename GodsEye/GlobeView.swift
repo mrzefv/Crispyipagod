@@ -991,7 +991,7 @@ struct SearchSheet: View {
             req.naturalLanguageQuery = trimmed
             req.resultTypes = [.pointOfInterest, .address]
             req.region = MKCoordinateRegion(center: originCenter, span: MKCoordinateSpan(latitudeDelta: 60, longitudeDelta: 60))
-            let resp: MKLocalSearch.Response?
+            var resp: MKLocalSearch.Response?
             let parcel: [ParcelRecord]
             do {
                 async let placeResp = MKLocalSearch(request: req).start()
