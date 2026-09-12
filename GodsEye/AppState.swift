@@ -534,22 +534,6 @@ final class AppState: ObservableObject {
                 pendingSelectionResolveAttempts = 0
                 return
             }
-
-            func applyPendingSharedView() {
-                guard let state = pendingSharedView else { return }
-                if let layers = state.layers, !layers.isEmpty { self.layers = layers }
-                if let traffic = state.showTraffic { showTraffic = traffic }
-                if let sensor = state.sensor { sensorStyleRaw = sensor }
-                if let center = state.center {
-                    let dist = max(3_000, min(state.distance ?? distance, AppState.globeDistance))
-                    fly(to: center, distance: dist)
-                }
-                pendingSharedView = nil
-            }
-
-            func dismissPendingSharedView() {
-                pendingSharedView = nil
-            }
             if sel.hasPrefix("sat-"),
                let sat = satellites.first(where: { "sat-\($0.id)" == sel }) {
                 selected = Entity.from(sat)
@@ -586,6 +570,24 @@ final class AppState: ObservableObject {
             pendingDeepLinkSelection = nil
             pendingSelectionResolveAttempts = 0
         }
+    }
+
+    func applyPendingSharedView() {
+        guard let state = pendingSharedView else { return }
+        if let layers = state.layers, !layers.isEmpty { self.layers = layers }
+        if let traffic = state.showTraffic { showTraffic = traffic }
+        if let sensor = state.sensor { sensorStyleRaw = sensor }
+        if let center = state.center {
+            let dist = max(3_000, min(state.distance ?? distance, AppState.globeDistance))
+            fly(to: center, distance: dist)
+        } else if let dist = state.distance {
+            fly(to: center, distance: max(3_000, min(dist, AppState.globeDistance)))
+        }
+        pendingSharedView = nil
+    }
+
+    func dismissPendingSharedView() {
+        pendingSharedView = nil
     }
 
     func entity(forBookmark b: Bookmark) -> Entity {
