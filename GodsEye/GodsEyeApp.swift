@@ -31,6 +31,15 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.7), value: s.ready)
         .task { await s.boot() }
         .onOpenURL { s.handleDeepLink($0) }
+        .alert("Apply shared view state?", isPresented: Binding(
+            get: { s.pendingSharedView != nil },
+            set: { if !$0 { s.dismissPendingSharedView() } })
+        ) {
+            Button("Apply") { s.applyPendingSharedView() }
+            Button("Ignore", role: .cancel) { s.dismissPendingSharedView() }
+        } message: {
+            Text("This link can change layers, sensor mode, traffic, and camera position.")
+        }
     }
 }
 

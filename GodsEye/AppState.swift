@@ -5,6 +5,13 @@ import CoreLocation
 
 @MainActor
 final class AppState: ObservableObject {
+    struct SharedViewState {
+        let layers: Set<Layer>?
+        let showTraffic: Bool?
+        let sensor: String?
+        let center: CLLocationCoordinate2D?
+        let distance: Double?
+    }
     static let home = CLLocationCoordinate2D(latitude: 20, longitude: -20)
     static let globeDistance: Double = 26_000_000
 
@@ -65,6 +72,7 @@ final class AppState: ObservableObject {
     @Published var trackedEntityId: String?
     @Published var trackTrail: [CLLocationCoordinate2D] = []
     @Published var nearbyIndex = 0
+    @Published var pendingSharedView: SharedViewState?
 
     let location = LocationService()
     private let ud = UserDefaults.standard
@@ -484,16 +492,26 @@ final class AppState: ObservableObject {
               comps.host == "view",
               let q = comps.queryItems else { return }
         func qv(_ name: String) -> String? { q.first(where: { $0.name == name })?.value }
+        var pendingStateLayers: Set<Layer>?
         if let csv = qv("layers") {
             let set = Set(csv.split(separator: ",").compactMap { Layer(rawValue: String($0)) })
-            if !set.isEmpty { layers = set }
+            if !set.isEmpty { pendingStateLayers = set }
         }
-        if let traffic = qv("traffic") { showTraffic = (traffic == "1") }
-        if let sensor = qv("sensor"), SensorStyle(rawValue: sensor) != nil { sensorStyleRaw = sensor }
-        if let la = qv("lat").flatMap(Double.init),
-           let lo = qv("lon").flatMap(Double.init),
-           let dist = qv("dist").flatMap(Double.init) {
-            fly(to: .init(latitude: la, longitude: lo), distance: max(3_000, min(dist, AppState.globeDistance)))
+        let pendingTraffic = qv("traffic").map { $0 == "1" }
+        let pendingSensor = qv("sensor").flatMap { SensorStyle(rawValue: $0) != nil ? $0 : nil }
+        let pendingCenter: CLLocationCoordinate2D? = {
+            guard let la = qv("lat").flatMap(Double.init), let lo = qv("lon").flatMap(Double.init) else { return nil }
+            return .init(latitude: la, longitude: lo)
+        }()
+        let pendingDist = qv("dist").flatMap(Double.init)
+        if pendingStateLayers != nil || pendingTraffic != nil || pendingSensor != nil || pendingCenter != nil || pendingDist != nil {
+            pendingSharedView = SharedViewState(
+                layers: pendingStateLayers,
+                showTraffic: pendingTraffic,
+                sensor: pendingSensor,
+                center: pendingCenter,
+                distance: pendingDist
+            )
         }
         pendingDeepLinkSelection = (
             sel: qv("sel"),
@@ -515,6 +533,22 @@ final class AppState: ObservableObject {
                 pendingDeepLinkSelection = nil
                 pendingSelectionResolveAttempts = 0
                 return
+            }
+
+            func applyPendingSharedView() {
+                guard let state = pendingSharedView else { return }
+                if let layers = state.layers, !layers.isEmpty { self.layers = layers }
+                if let traffic = state.showTraffic { showTraffic = traffic }
+                if let sensor = state.sensor { sensorStyleRaw = sensor }
+                if let center = state.center {
+                    let dist = max(3_000, min(state.distance ?? distance, AppState.globeDistance))
+                    fly(to: center, distance: dist)
+                }
+                pendingSharedView = nil
+            }
+
+            func dismissPendingSharedView() {
+                pendingSharedView = nil
             }
             if sel.hasPrefix("sat-"),
                let sat = satellites.first(where: { "sat-\($0.id)" == sel }) {
