@@ -34,8 +34,8 @@ struct RootView: View {
         .onReceive(s.location.$coordinate) { c in if c != nil && s.alertISS { s.computePasses() } }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                s.cctv.start()
-            } else if phase == .background {
+                s.cctv.resume()
+            } else {
                 s.cctv.stop()
             }
         }

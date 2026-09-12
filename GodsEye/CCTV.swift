@@ -44,10 +44,14 @@ final class CamRecorder {
         stop()
         refreshMetrics()
         guard !watching.isEmpty else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(intervalSeconds), repeats: true) { [weak self] _ in
-            self?.scheduleCapture()
-        }
+        installTimer()
         scheduleCapture()
+    }
+
+    func resume() {
+        refreshMetrics()
+        guard timer == nil, !watching.isEmpty else { return }
+        installTimer()
     }
 
     func stop() {
@@ -67,8 +71,15 @@ final class CamRecorder {
 
     func clearAll() {
         try? fm.removeItem(at: rootURL)
+        lastFrameDigests = [:]
         frameCounts = [:]
         storageBytes = 0
+    }
+
+    private func installTimer() {
+        timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(intervalSeconds), repeats: true) { [weak self] _ in
+            self?.scheduleCapture()
+        }
     }
 
     private func scheduleCapture() {
