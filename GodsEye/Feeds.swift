@@ -421,6 +421,97 @@ final class Feeds {
         return rings
     }
 
+    // MARK: Nominatim parcel/address/owner search (keyless)
+
+    func parcelRecords(query: String, near center: CLLocationCoordinate2D, limit: Int = 10) async throws -> [ParcelRecord] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard q.count >= 2 else { return [] }
+        let rawLeftLon = center.longitude - 1.2
+        let rawRightLon = center.longitude + 1.2
+        let topLat = min(90, center.latitude + 1.0)
+        let bottomLat = max(-90, center.latitude - 1.0)
+        let key = q.lowercased()
+            .replacingOccurrences(of: "[^a-z0-9]+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        let posix = Locale(identifier: "en_US_POSIX")
+        let latKey = String(format: "%.2f", locale: posix, center.latitude)
+        let lonKey = String(format: "%.2f", locale: posix, center.longitude)
+        let cacheKey = "parcel-\(String(key.prefix(40)).ifEmpty("search"))-\(latKey)-\(lonKey).json"
+        let limitValue = String(max(1, min(limit, 30)))
+        func makeURL(viewbox: String) -> String {
+            var c = URLComponents(string: "https://nominatim.openstreetmap.org/search")
+            c?.queryItems = [
+                URLQueryItem(name: "q", value: q),
+                URLQueryItem(name: "format", value: "jsonv2"),
+                URLQueryItem(name: "addressdetails", value: "1"),
+                URLQueryItem(name: "extratags", value: "1"),
+                URLQueryItem(name: "dedupe", value: "1"),
+                URLQueryItem(name: "limit", value: limitValue),
+                URLQueryItem(name: "viewbox", value: viewbox),
+                URLQueryItem(name: "bounded", value: "1")
+            ]
+            return c?.url?.absoluteString ?? "https://nominatim.openstreetmap.org/search"
+        }
+        let boxes: [(name: String, left: Double, right: Double)] = {
+            if rawLeftLon < -180 {
+                return [
+                    ("w", -180, min(180, rawRightLon)),
+                    ("e", max(-180, rawLeftLon + 360), 180)
+                ]
+            }
+            if rawRightLon > 180 {
+                return [
+                    ("e", max(-180, rawLeftLon), 180),
+                    ("w", -180, min(180, rawRightLon - 360))
+                ]
+            }
+            return [("c", max(-180, rawLeftLon), min(180, rawRightLon))]
+        }()
+        func parse(_ rows: [[String: Any]]) -> [ParcelRecord] {
+            rows.compactMap { row in
+            guard let la = row["lat"] as? String, let lo = row["lon"] as? String,
+                  let lat = Double(la), let lon = Double(lo) else { return nil }
+            let display = row["display_name"] as? String ?? "Unknown address"
+            let name = row["name"] as? String
+            let ext = row["extratags"] as? [String: Any]
+            let addr = row["address"] as? [String: Any]
+            let osmType = (row["osm_type"] as? String ?? "?").uppercased()
+            let osmID = String(describing: row["osm_id"] ?? "")
+            let recordID = "\(osmType.prefix(1))\(osmID)"
+            let house = (addr?["house_number"] as? String).ifEmpty(name ?? "")
+            let road = (addr?["road"] as? String).ifEmpty(addr?["pedestrian"] as? String ?? "")
+            let fallbackTitle = [house, road].filter { !$0.isEmpty }.joined(separator: " ")
+            let owner = (ext?["owner"] as? String).ifEmpty((ext?["operator"] as? String).ifEmpty(ext?["contact:person"] as? String ?? ""))
+            return ParcelRecord(
+                id: recordID.isEmpty ? "parcel-\(lat)-\(lon)" : recordID,
+                osmRecordID: recordID.ifEmpty("—"),
+                title: (name ?? "").ifEmpty(fallbackTitle.ifEmpty(display.components(separatedBy: ",").first?.trimmingCharacters(in: .whitespaces) ?? "Property record")),
+                address: display,
+                owner: owner.isEmpty ? nil : owner,
+                lat: lat,
+                lon: lon
+            )
+        }
+        }
+        var out: [ParcelRecord] = []
+        var seen = Set<String>()
+        for (idx, box) in boxes.enumerated() {
+            let leftLon = box.left
+            let topLatBox = topLat
+            let rightLon = box.right
+            let bottomLatBox = bottomLat
+            let viewbox = String(format: "%.5f,%.5f,%.5f,%.5f", locale: posix, leftLon, topLatBox, rightLon, bottomLatBox)
+            let d = try await fetch(makeURL(viewbox: viewbox), cache: "\(cacheKey)-\(box.name)-\(idx)")
+            guard let arr = try JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { continue }
+            for r in parse(arr) where !seen.contains(r.id) {
+                seen.insert(r.id)
+                out.append(r)
+                if out.count >= limit { return out }
+            }
+        }
+        return out
+    }
+
     // MARK: Anthropic HUD summary (user key)
 
     func aiSummary(key: String, model: String, context: String) async throws -> String {

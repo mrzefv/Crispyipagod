@@ -65,6 +65,7 @@ Target: iOS 17+. Bundle id `party.mrvek.godseye`.
 - **Sun & space weather:** day/night terminator, subsolar point, NOAA OVATION aurora oval, Kp / solar wind / GOES X-ray class, satellites-visible-from-you (sunlit + you in darkness).
 - **Terrain:** OSM peaks with elevation, point elevation, terrain profile between the two Measure points (Swift Charts).
 - **Scanner:** Broadcastify top feeds (parsed from the public list, geocoded from titles) with one-tap listen, or enter any feed ID. This is the honest replacement for "police chases" — live dispatch audio for the area you're looking at.
+- **Search boost:** Search now includes parcel/address matches with available owner/operator metadata from OpenStreetMap Nominatim, so you can jump directly to property records from the Search sheet.
 - New missions: Weather Ops · Grid & Rail · Situational.
 
 ## Feeds (no keys)
