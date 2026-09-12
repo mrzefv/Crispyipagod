@@ -369,7 +369,7 @@ final class Feeds {
         [out:json][timeout:20];(
           way["building"~"^(house|detached|semidetached_house|terrace|apartments|residential)$"](\(bbox));
           relation["building"~"^(house|detached|semidetached_house|terrace|apartments|residential)$"](\(bbox));
-        );out geom 700;
+        );out geom;
         """
         let r = try await overpass(q, cache: cacheKey)
         return Array(r.elements.compactMap(\.value).compactMap { e in

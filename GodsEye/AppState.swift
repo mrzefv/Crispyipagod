@@ -498,12 +498,13 @@ final class AppState: ObservableObject {
         let span = max(0.006, requestedDistance / 550_000)
         do {
             let fetched = try await Feeds.shared.residentialBlueprints(center: requestedCenter, spanDeg: span)
+            let fetchSpanMeters = span * 111_000
             let centerShiftMeters = CLLocation(latitude: center.latitude, longitude: center.longitude)
                 .distance(from: CLLocation(latitude: requestedCenter.latitude, longitude: requestedCenter.longitude))
             guard layers.contains(.residential),
                   distance < 8_000,
-                  centerShiftMeters < max(requestedDistance * 0.35, 400),
-                  abs(distance - requestedDistance) < max(requestedDistance * 0.35, 600) else { return }
+                  centerShiftMeters < max(fetchSpanMeters * 0.5, 400),
+                  abs(distance - requestedDistance) < max(fetchSpanMeters, 600) else { return }
             residentialBlueprints = fetched
         } catch {
             feedErrors += 1
