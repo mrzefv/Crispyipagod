@@ -1,4 +1,5 @@
 import {
+  advancePlayback,
   cycleMapStyle,
   closeTimeline,
   createInitialState,
@@ -51,8 +52,7 @@ function loadCoreAssets() {
 function startPlayback() {
   stopPlayback();
   playbackTimer = window.setInterval(() => {
-    const nextTime = state.selectedTime >= 100 ? 0 : state.selectedTime + 5;
-    state = setSelectedTime(state, nextTime);
+    state = advancePlayback(state);
     render();
   }, 700);
 }
@@ -72,15 +72,17 @@ function shareLocation(location) {
 function locationButton(location) {
   const selected = location.id === state.selectedLocationId;
   return `
-    <button
-      class="marker ${selected ? "marker--selected" : ""}"
-      style="left: ${location.marker.x}%; top: ${location.marker.y}%"
-      data-action="select-location"
-      data-location-id="${escapeHtml(location.id)}"
-      aria-label="Open details for ${escapeHtml(location.name)}"
-    >
-      <span></span>
-    </button>
+    <li class="marker-item">
+      <button
+        class="marker ${selected ? "marker--selected" : ""}"
+        style="left: ${location.marker.x}%; top: ${location.marker.y}%"
+        data-action="select-location"
+        data-location-id="${escapeHtml(location.id)}"
+        aria-label="Open details for ${escapeHtml(location.name)}"
+      >
+        <span></span>
+      </button>
+    </li>
   `;
 }
 
@@ -149,7 +151,9 @@ function renderGlobe(selectedLocation, overlayContent = "") {
       <div class="globe globe--${state.mapStyle.toLowerCase()}">
         <div class="globe-core"></div>
         <div class="globe-grid"></div>
-        ${locations.map(locationButton).join("")}
+        <ul class="marker-list" aria-label="Selectable globe locations">
+          ${locations.map(locationButton).join("")}
+        </ul>
       </div>
       ${overlayContent}
     </main>
@@ -216,6 +220,7 @@ function renderTimeline() {
                 style="left: ${event.time}%"
                 data-action="timeline-event"
                 data-time="${event.time}"
+                aria-label="${escapeHtml(`${event.label} at ${event.time}`)}"
               >
                 <span>${escapeHtml(event.label)}</span>
               </button>
@@ -442,11 +447,13 @@ function bindEvents() {
   });
 
   app.querySelectorAll("select[data-setting]").forEach((element) => {
-    element.addEventListener("change", () => {
-      setState(updateSetting(state, element.dataset.setting, element.value));
+    element.addEventListener("change", (event) => {
+      setState(updateSetting(state, element.dataset.setting, event.currentTarget.value));
     });
   });
 }
 
 render();
-loadCoreAssets().then(() => setState(finishLoading(state)));
+loadCoreAssets()
+  .then(() => setState(finishLoading(state)))
+  .catch(() => setState({ ...finishLoading(state), status: "Loaded in fallback mode" }));

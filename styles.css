@@ -169,6 +169,16 @@ select {
   place-items: center;
 }
 
+.marker-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.marker-item {
+  margin: 0;
+}
+
 .globe-core,
 .globe-grid {
   position: absolute;
@@ -406,12 +416,15 @@ select {
 
 @media (max-width: 720px) {
   .top-bar,
-  .bottom-panel,
   .sheet-heading,
   .timeline-header,
   .panel-header {
     grid-template-columns: 1fr;
     display: grid;
+  }
+
+  .bottom-panel {
+    flex-direction: column;
   }
 
   .detail-sheet {

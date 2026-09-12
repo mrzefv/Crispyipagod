@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  advancePlayback,
   cycleMapStyle,
   closeTimeline,
   createInitialState,
@@ -77,6 +78,14 @@ test("detail sheet and playback toggles flip boolean state", () => {
 
   assert.equal(expanded.detailExpanded, true);
   assert.equal(playing.isPlaying, true);
+});
+
+test("playback advances by five and wraps after one hundred", () => {
+  const advancing = advancePlayback(setSelectedTime(createInitialState(), 95));
+  const wrapped = advancePlayback(setSelectedTime(createInitialState(), 100));
+
+  assert.equal(advancing.selectedTime, 100);
+  assert.equal(wrapped.selectedTime, 0);
 });
 
 test("timeline event jumps choose the closest previous and next markers", () => {

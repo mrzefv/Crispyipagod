@@ -173,6 +173,13 @@ export function setSelectedTime(state, selectedTime) {
   };
 }
 
+export function advancePlayback(state) {
+  return {
+    ...state,
+    selectedTime: state.selectedTime >= 100 ? 0 : state.selectedTime + 5,
+  };
+}
+
 export function togglePlayback(state) {
   return {
     ...state,
