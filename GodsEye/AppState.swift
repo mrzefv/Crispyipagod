@@ -591,13 +591,16 @@ final class AppState: ObservableObject {
         var performedAsyncRefresh = false
         if let layers = state.layers, !layers.isEmpty {
             self.layers = layers
-            performedAsyncRefresh = true
-            Task {
-                if layers.contains(.satellites) { await refreshSatellites() }
-                if layers.contains(.launches) { await refreshLaunches() }
-                if layers.contains(.military) { await refreshMilitary() }
-                if layers.contains(.flights) { await refreshContacts(force: true) }
-                resolvePendingDeepLinkSelection()
+            let shouldRefresh = layers.contains(.satellites) || layers.contains(.launches) || layers.contains(.military) || layers.contains(.flights)
+            performedAsyncRefresh = shouldRefresh
+            if shouldRefresh {
+                Task {
+                    if layers.contains(.satellites) { await refreshSatellites() }
+                    if layers.contains(.launches) { await refreshLaunches() }
+                    if layers.contains(.military) { await refreshMilitary() }
+                    if layers.contains(.flights) { await refreshContacts(force: true) }
+                    resolvePendingDeepLinkSelection()
+                }
             }
         }
         if let traffic = state.showTraffic { showTraffic = traffic }

@@ -139,7 +139,8 @@ final class Feeds {
             out = [iss]
         }
         guard !out.isEmpty else { throw FeedError.badResponse }
-        return out
+        let order = Dictionary(uniqueKeysWithValues: satelliteCatalog.enumerated().map { ($1.id, $0) })
+        return out.sorted { (order[$0.id] ?? .max) < (order[$1.id] ?? .max) }
     }
 
     func launches() async throws -> [Launch] {

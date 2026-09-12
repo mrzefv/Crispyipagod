@@ -29,7 +29,7 @@ Target: iOS 17+. Bundle id `party.mrvek.godseye`.
 | Flights | adsb.lol `/v2/lat/lon/dist/250` around map center |
 | Military | adsb.lol `/v2/mil` |
 | Earthquakes | USGS `all_day.geojson` |
-| Satellites | wheretheiss.at (ISS + additional public NORAD IDs) |
+| Satellites | wheretheiss.at (ISS + curated additional NORAD IDs) |
 | Space missions | Launch Library 2 (previous 10 + upcoming 15) |
 | Public cameras | Curated public city camera portals (overlay points + source links) |
 
