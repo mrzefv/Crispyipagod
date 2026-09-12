@@ -43,7 +43,7 @@ final class AppState: ObservableObject {
             rebuildDisplay()
             if layers.contains(.military) && militaryContacts.isEmpty { Task { await refreshMilitary() } }
             if layers.contains(.satellites) && propagators.isEmpty { Task { await refreshSatellites() } }
-            if layers.contains(.cctv) && cameras.isEmpty { Task { await refreshCameras() } }
+            if (layers.contains(.cctv) || !cctv.watching.isEmpty) && cameras.isEmpty { Task { await refreshCameras() } }
             if layers.contains(.ships) { connectAIS() } else { ais.disconnect() }
             if layers.contains(.fires) && fires.isEmpty { Task { await refreshFires() } }
             if layers.contains(.radio) && radioStations.isEmpty { Task { await refreshRadio() } }
@@ -51,6 +51,17 @@ final class AppState: ObservableObject {
             if layers.contains(.bikeshare) { Task { await refreshBikes() } }
             if layers.contains(.infra) { Task { await refreshInfra() } }
             if layers.contains(.airport) { Task { await refreshAirport() } }
+            if layers.contains(.radar) || layers.contains(.satir) { Task { if radar.frames.isEmpty { await radar.load() }; rebuildRadar() } } else { radar.composite = nil; radar.satComposite = nil }
+            if layers.contains(.wind) { Task { await refreshWind() } }
+            if layers.contains(.power) { Task { await refreshPower() } }
+            if layers.contains(.rail) { Task { await refreshRail() } }
+            if layers.contains(.trains) && trains.isEmpty { Task { await refreshTrains() } }
+            if layers.contains(.airports) && airports.isEmpty { Task { await refreshAirports() } }
+            if layers.contains(.stations) { Task { await refreshStations() } }
+            if layers.contains(.alerts) && hazards.isEmpty { Task { await refreshHazards() } }
+            if layers.contains(.space) { Task { await refreshSpace() } }
+            if layers.contains(.scanner) && scanners.isEmpty { Task { await refreshScanners() } }
+            if layers.contains(.peaks) { Task { await refreshPeaks() } }
         }
     }
     @Published var contacts: [Contact] = [] { didSet { rebuildDisplay(); trackTick(fromPoll: true) } }
@@ -69,6 +80,38 @@ final class AppState: ObservableObject {
     @Published private(set) var visibleBikes: [BikeStation] = []
     @Published private(set) var visibleRadio: [RadioStation] = []
     @Published private(set) var visibleCables: [Cable] = []
+    let radar = RadarEngine()
+    @Published var viewWidth: Double = 390
+    @Published var radarOpacity: Double = 0.75 { didSet { ud.set(radarOpacity, forKey: "radarOpacity") } }
+    @Published var winds: [WindVector] = []
+    @Published var powerLines: [PowerLine] = []
+    @Published var powerNodes: [InfraNode] = []
+    @Published var railLines: [RailLine] = []
+    @Published var railStations: [RailStation] = []
+    @Published var trains: [Train] = []
+    @Published var airports: [Airport] = []
+    @Published var stations: [WxStation] = []
+    @Published var hazards: [HazardAlert] = []
+    @Published var scanners: [ScannerFeed] = []
+    @Published var peaks: [Peak] = []
+    @Published var space = SpaceWeather()
+    @Published var auroraPoints: [AuroraPoint] = []
+    @Published var night: [CLLocationCoordinate2D] = []
+    @Published var storms: [StormCell] = []
+    @Published var showRadar = false
+    @Published var showStation: WxStation?
+    @Published var showProfile = false
+    @Published var showSpace = false
+    @Published var showScanner = false
+    @Published var profile: [(dist: Double, elev: Double)] = []
+    @Published var profileLoading = false
+    @Published var scannerNow: ScannerFeed?
+    @Published private(set) var visibleAirports: [Airport] = []
+    @Published private(set) var visibleStations: [WxStation] = []
+    @Published private(set) var visibleHazards: [HazardAlert] = []
+    @Published private(set) var visibleTrains: [Train] = []
+    @Published var quakeWindowDays = 1 { didSet { Task { await refreshQuakes() } } }
+    private let scannerPlayer = RadioPlayer()
     @Published var iss: SatPos?
     @Published var launches: [Launch] = []
     @Published var lastUpdate: Date?
@@ -119,6 +162,8 @@ final class AppState: ObservableObject {
     @Published var keyframes: [Keyframe] = []
     @Published var scenePlaying = false
     let radio = RadioPlayer()
+    let cctv = CamRecorder()
+    @Published var liveCamera: Camera?
     private var orbitTask: Task<Void, Never>?
     private var replayTask: Task<Void, Never>?
     private var sceneTask: Task<Void, Never>?
@@ -145,7 +190,7 @@ final class AppState: ObservableObject {
     // Timeline
     let windowStart: Date
     let windowEnd: Date
-    @Published var timeCursor: Date? { didSet { if (timeCursor == nil) != (oldValue == nil) || playing == false { rebuildDisplay() } } }
+    @Published var timeCursor: Date? { didSet { if (timeCursor == nil) != (oldValue == nil) || playing == false { rebuildDisplay(); rebuildRadar() } } }
     @Published var playing = false
     @Published var focusedEvent: Entity?
 
@@ -203,6 +248,7 @@ final class AppState: ObservableObject {
         alertISS = ud.bool(forKey: "alertIss")
         alertQuakeMag = ud.object(forKey: "alertEqMag") as? Double ?? 5.0
         wakes = ud.object(forKey: "wakes") as? Bool ?? true
+        radarOpacity = ud.object(forKey: "radarOpacity") as? Double ?? 0.75
         viewsheds = ud.bool(forKey: "viewsheds")
         sensor = SensorMode(rawValue: ud.string(forKey: "sensor") ?? "") ?? .normal
         hud = ud.bool(forKey: "hud")
@@ -213,6 +259,21 @@ final class AppState: ObservableObject {
         ais.onShip = { [weak self] ship in self?.ingest(ship) }
         ais.onStatus = { [weak self] st in self?.aisStatus = st }
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
+        cctv.cameraLookup = { [weak self] id in self?.cameras.first { $0.id == id } }
+    }
+
+    func neighborCamera(of cam: Camera, forward: Bool) -> Camera? {
+        let near = cameras.filter { $0.id != cam.id && $0.available && $0.coord.distance(to: cam.coord) < 25_000 }
+            .sorted { $0.coord.distance(to: cam.coord) < $1.coord.distance(to: cam.coord) }
+        guard !near.isEmpty else { return nil }
+        // Ring order by bearing so prev/next sweep around the current camera
+        let ring = near.prefix(12).sorted { Geo.bearing(from: cam.coord, to: $0.coord) < Geo.bearing(from: cam.coord, to: $1.coord) }
+        return forward ? ring.first : ring.last
+    }
+
+    func openLive(_ cam: Camera) {
+        selected = nil
+        Task { try? await Task.sleep(nanoseconds: 350_000_000); self.liveCamera = cam }
     }
 
     // MARK: Derived
@@ -333,6 +394,149 @@ final class AppState: ObservableObject {
             cb = Array(cb.prefix(performanceMode ? 60 : 140))
         }
         if cb != visibleCables { visibleCables = cb }
+
+        var ap: [Airport] = []
+        if layers.contains(.airports) {
+            ap = distance > 4_000_000 ? airports.filter { $0.type == "large_airport" }
+               : Array(airports.map { ($0, $0.coord.distance(to: cen)) }.filter { $0.1 < distance * 2.5 }.sorted { $0.1 < $1.1 }.prefix(performanceMode ? 150 : 300).map(\.0))
+        }
+        if ap != visibleAirports { visibleAirports = ap }
+
+        var ws: [WxStation] = []
+        if layers.contains(.stations), distance < 5_000_000 {
+            ws = Array(stations.map { ($0, $0.coord.distance(to: cen)) }.sorted { $0.1 < $1.1 }.prefix(performanceMode ? 150 : 300).map(\.0))
+        }
+        if ws != visibleStations { visibleStations = ws }
+
+        var hz: [HazardAlert] = []
+        if layers.contains(.alerts) {
+            hz = distance > 6_000_000 ? hazards.filter { $0.severity == "Extreme" || $0.severity == "Severe" }
+               : Array(hazards.map { ($0, $0.coord.distance(to: cen)) }.sorted { $0.1 < $1.1 }.prefix(120).map(\.0))
+        }
+        if hz != visibleHazards { visibleHazards = hz }
+
+        var tr: [Train] = []
+        if layers.contains(.trains) {
+            tr = distance > 6_000_000 ? trains : Array(trains.map { ($0, $0.coord.distance(to: cen)) }.sorted { $0.1 < $1.1 }.prefix(300).map(\.0))
+        }
+        if tr != visibleTrains { visibleTrains = tr }
+    }
+
+    func rebuildRadar() {
+        guard layers.contains(.radar) || layers.contains(.satir) else { return }
+        radar.rebuild(center: center, distance: distance, viewWidth: viewWidth, radar: layers.contains(.radar), sat: layers.contains(.satir))
+        if let t = timeCursor, !radar.radarFrames.isEmpty {
+            let i = radar.radarFrames.enumerated().min { abs($0.element.time.timeIntervalSince(t)) < abs($1.element.time.timeIntervalSince(t)) }?.offset ?? radar.latestIndex
+            if i != radar.index { radar.index = i }
+        }
+    }
+
+    func refreshWind() async {
+        guard layers.contains(.wind) else { return }
+        let span = max(0.5, min(12.0, distance / 160_000))
+        do { winds = try await Feeds.shared.windGrid(center: center, spanDeg: span) } catch { feedErrors += 1 }
+    }
+    func refreshPower() async {
+        guard layers.contains(.power), distance < 250_000 else { powerLines = []; powerNodes = []; return }
+        do { (powerLines, powerNodes) = try await Feeds.shared.powerGrid(center: center, spanDeg: max(0.15, distance / 111_000)) } catch { feedErrors += 1 }
+    }
+    func refreshRail() async {
+        guard layers.contains(.rail), distance < 150_000 else { railLines = []; railStations = []; return }
+        do { (railLines, railStations) = try await Feeds.shared.rail(center: center, spanDeg: max(0.1, distance / 111_000)) } catch { feedErrors += 1 }
+    }
+    func refreshTrains() async {
+        guard layers.contains(.trains) else { return }
+        trains = await Feeds.shared.trains()
+        rebuildDisplay()
+        if let tid = trackedID, tid.hasPrefix("train-"), let t = trains.first(where: { "train-\($0.id)" == tid }) {
+            trackedCoord = t.coord; trackedHeading = t.heading; trackedEntity = Entity.from(t)
+            trail.append(t.coord); if trail.count > 240 { trail.removeFirst(trail.count - 240) }
+            followCamera(animated: true)
+            LiveActivityManager.shared.update(Entity.from(t), coord: t.coord)
+        }
+    }
+    func refreshAirports() async {
+        do { airports = try await Feeds.shared.airports(); rebuildDisplay() } catch { feedErrors += 1 }
+    }
+    func refreshStations() async {
+        guard layers.contains(.stations) else { return }
+        let mm = (try? await Feeds.shared.metars(center: center, spanDeg: max(1.0, distance / 111_000))) ?? []
+        let bb = (try? await Feeds.shared.buoys()) ?? []
+        stations = mm + bb
+        rebuildDisplay()
+    }
+    func refreshHazards() async {
+        let nn = (try? await Feeds.shared.nwsAlerts()) ?? []
+        let cc = (try? await Feeds.shared.calFire()) ?? []
+        hazards = nn + cc
+        rebuildDisplay()
+        if alertQuakes {   // reuse the alerts permission; extreme hazards near me
+            if let me = location.coordinate {
+                for h in hazards where (h.severity == "Extreme") && h.coord.distance(to: me) < 150_000 {
+                    Alerts.shared.fire(id: "haz-\(h.id)", title: h.event, body: h.headline)
+                }
+            }
+        }
+    }
+    func refreshSpace() async {
+        space = await Feeds.shared.spaceWeather()
+        auroraPoints = space.aurora.enumerated().map { AuroraPoint(id: $0.offset, lat: $0.element.lat, lon: $0.element.lon, prob: $0.element.prob) }
+        night = Solar.nightPolygon(Date())
+    }
+    func refreshScanners() async {
+        do {
+            var list = try await Feeds.shared.scannerFeeds()
+            // resolve locations from titles (cached in UserDefaults)
+            var geo = (ud.dictionary(forKey: "scannerGeo") as? [String: [Double]]) ?? [:]
+            for i in list.indices {
+                if let g = geo[list[i].id], g.count == 2 { list[i].lat = g[0]; list[i].lon = g[1]; continue }
+                let q = list[i].title.replacingOccurrences(of: "(?i)(police|fire|ems|sheriff|dispatch|county|city|and|&|department|dept|public safety|scanner)", with: " ", options: .regularExpression)
+                if let c = await geocode(q.trimmingCharacters(in: .whitespaces)) { list[i].lat = c.latitude; list[i].lon = c.longitude; geo[list[i].id] = [c.latitude, c.longitude] }
+                if i > 40 { break }
+            }
+            ud.set(geo, forKey: "scannerGeo")
+            scanners = list.filter { $0.lat != 0 || $0.lon != 0 }
+        } catch { feedErrors += 1 }
+    }
+    func refreshPeaks() async {
+        guard layers.contains(.peaks), distance < 300_000 else { peaks = []; return }
+        do { peaks = try await Feeds.shared.peaks(center: center, spanDeg: max(0.1, distance / 111_000)) } catch { feedErrors += 1 }
+    }
+
+    func listen(_ f: ScannerFeed) {
+        scannerNow = f
+        scannerPlayer.play(RadioStation(stationuuid: f.id, name: f.title, url_resolved: f.streamURL, country: f.genre, geo_lat: f.lat, geo_long: f.lon, tags: nil, codec: "mp3", clickcount: f.listeners))
+        show("Listening: \(f.title)")
+    }
+    func stopScanner() { scannerPlayer.stop(); scannerNow = nil }
+
+    func trackStorm(at c: CLLocationCoordinate2D) {
+        Task {
+            show("Analyzing radar…")
+            if let cell = await radar.trackStorm(near: c, center: center, distance: distance, viewWidth: viewWidth) {
+                storms.removeAll { $0.id == cell.id }
+                storms.append(cell)
+                track(Entity.from(cell))
+            } else { show("No storm cell near that point") }
+        }
+    }
+
+    func loadProfile() {
+        guard let a = measureA, let b = measureB else { show("Measure two points first"); return }
+        profileLoading = true
+        showProfile = true
+        Task {
+            let pts = Geo.greatCircle(a, b, points: 80)
+            if let e = try? await Feeds.shared.elevations(pts) {
+                let total = a.distance(to: b) / 1000
+                profile = e.enumerated().map { (dist: total * Double($0.offset) / Double(max(1, e.count - 1)), elev: $0.element) }
+            } else { show("Elevation service unavailable") }
+            profileLoading = false
+        }
+    }
+
+    func elevation(at c: CLLocationCoordinate2D) async -> Double? {
+        (try? await Feeds.shared.elevations([c]))?.first
     }
 
     var visibleLaunches: [Launch] { layers.contains(.launches) ? launches : [] }
@@ -345,6 +549,7 @@ final class AppState: ObservableObject {
     var timelineEvents: [Entity] {
         var e: [Entity] = quakes.filter { $0.mag >= 4.5 }.map { Entity.from($0) }
         e += launches.map { Entity.from($0) }
+        e += hazards.filter { $0.source == "NWS" && $0.starts != nil && ($0.severity == "Extreme" || $0.severity == "Severe") }.prefix(40).map { Entity.from($0) }
         return e.filter { ($0.time ?? .distantPast) >= windowStart && ($0.time ?? .distantFuture) <= windowEnd }
                 .sorted { ($0.time ?? .distantPast) < ($1.time ?? .distantPast) }
     }
@@ -366,6 +571,7 @@ final class AppState: ObservableObject {
         }
         if kind == nil || kind == "ship" { all += visibleShips.map { Entity.from($0) } }
         if kind == nil || kind == "satellite" { all += visibleSatellites.map { Entity.from($0) } }
+        if kind == nil || kind == "train" { all += visibleTrains.map { Entity.from($0) } }
         let c = center
         var seen = Set<String>()
         return all.filter { seen.insert($0.id).inserted }
@@ -401,6 +607,12 @@ final class AppState: ObservableObject {
         if layers.contains(.radio) { await refreshRadio() }
         if layers.contains(.cables) { await refreshCables() }
         registerBackgroundTasks()
+        cctv.start()
+        if layers.contains(.airports) { await refreshAirports() }
+        if layers.contains(.alerts) { await refreshHazards() }
+        if layers.contains(.space) { await refreshSpace() }
+        if layers.contains(.radar) || layers.contains(.satir) { await radar.load(); rebuildRadar() }
+        if !cctv.watching.isEmpty && cameras.isEmpty { await refreshCameras() }
         if let u = pendingDeepLink { pendingDeepLink = nil; open(url: u) }
     }
 
@@ -420,6 +632,13 @@ final class AppState: ObservableObject {
                 if tick % 6 == 0 { self.rebuildDisplay() }
                 if tick % 8 == 0, self.layers.contains(.bikeshare) { await self.refreshBikes() }
                 if tick % 40 == 0, self.layers.contains(.fires) { await self.refreshFires() }
+                if tick % 2 == 0, self.layers.contains(.trains) { await self.refreshTrains() }
+                if tick % 20 == 0, self.layers.contains(.stations) { await self.refreshStations() }
+                if tick % 20 == 0, self.layers.contains(.alerts) { await self.refreshHazards() }
+                if tick % 40 == 0, self.layers.contains(.space) { await self.refreshSpace() }
+                if tick % 40 == 0, self.layers.contains(.wind) { await self.refreshWind() }
+                if tick % 20 == 0, self.layers.contains(.radar) || self.layers.contains(.satir) { await self.radar.load(); self.rebuildRadar() }
+                if tick % 4 == 0, self.layers.contains(.space) { self.night = Solar.nightPolygon(Date()) }
                 self.checkAlerts()
                 self.cacheBytes = FeedCache.size()
             }
@@ -482,7 +701,14 @@ final class AppState: ObservableObject {
     }
 
     func refreshQuakes() async {
-        do { quakes = try await Feeds.shared.quakes() } catch { feedErrors += 1 }
+        do { quakes = try await Feeds.shared.quakes(days: quakeWindowDays) } catch { feedErrors += 1 }
+    }
+
+    /// Aftershock clustering: quakes within 100 km and 7 days after a M≥5 mainshock.
+    var quakeClusters: [(main: Quake, count: Int)] {
+        let mains = quakes.filter { $0.mag >= 5 }
+        return mains.map { m in (m, quakes.filter { $0.id != m.id && $0.time > m.time && $0.time < m.time.addingTimeInterval(7 * 86400) && $0.coord.distance(to: m.coord) < 100_000 }.count) }
+            .filter { $0.1 >= 3 }.sorted { $0.1 > $1.1 }
     }
 
     func refreshISS() async {
@@ -604,8 +830,14 @@ final class AppState: ObservableObject {
                 if layers.contains(.infra) { await refreshInfra() }
                 if layers.contains(.airport) { await refreshAirport() }
                 if layers.contains(.fires), fires.isEmpty || distance < 500_000 { await refreshFires() }
+                if layers.contains(.wind) { await refreshWind() }
+                if layers.contains(.power) { await refreshPower() }
+                if layers.contains(.rail) { await refreshRail() }
+                if layers.contains(.stations) { await refreshStations() }
+                if layers.contains(.peaks) { await refreshPeaks() }
             }
         }
+        rebuildRadar()
         scheduleAISummary()
         geocodeTask?.cancel()
         if distance > 3_000_000 { centerName = "GLOBAL VIEW"; return }
@@ -704,12 +936,8 @@ final class AppState: ObservableObject {
         }
         guard let (cam, d) = nearestCamera(to: e.coord) else { show("No cameras loaded"); return }
         if !layers.contains(.cctv) { layers.insert(.cctv) }
-        selected = nil
-        Task {
-            try? await Task.sleep(nanoseconds: 400_000_000)
-            select(Entity.from(cam))
-            show(String(format: "Nearest cam %.0f km away", d / 1000))
-        }
+        show(String(format: "Nearest cam %.0f km away · %@", d / 1000, cam.source))
+        openLive(cam)
     }
 
     // MARK: Tracking / chase
@@ -740,6 +968,7 @@ final class AppState: ObservableObject {
         LiveActivityManager.shared.start(e)
         startWeather()
         if e.kind == .aircraft || e.kind == .military { Task { await loadTrace(for: e) } }
+        if e.kind == .storm, let cell = storms.first(where: { "storm-\($0.id)" == e.id }) { trail = cell.history }
         show("Tracking \(e.title)")
     }
 
@@ -829,8 +1058,8 @@ final class AppState: ObservableObject {
         if orbiting { return }
         let kind = trackedEntity?.kind ?? .aircraft
         if chase {
-            let d: Double = kind == .satellite ? 2_500_000 : (kind == .ship ? 1_500 : 2_800)
-            let p: Double = kind == .satellite ? 60 : 74
+            let d: Double = kind == .satellite ? 2_500_000 : (kind == .ship ? 1_500 : kind == .train ? 900 : kind == .storm ? 250_000 : 2_800)
+            let p: Double = kind == .satellite ? 60 : kind == .storm ? 30 : 74
             fly(to: c, distance: d, pitch: p, heading: trackedHeading, duration: duration)
         } else {
             let d = max(min(distance, kind == .satellite ? 6_000_000 : 400_000), kind == .satellite ? 800_000 : 3_000)
@@ -1224,6 +1453,14 @@ final class AppState: ObservableObject {
             computePasses()
             if let p = passes.first { show(String(format: "ISS: %@ · max %.0f°", Fmt.rel.localizedString(for: p.start, relativeTo: Date()), p.maxElevationDeg)) }
             else { show(location.coordinate == nil ? "Need your location for passes" : "No ISS pass in 24h") }
+        case .radarToggle(let on): if on { layers.insert(.radar) } else { layers.remove(.radar) }
+        case .listenScanner(let place):
+            Task { if scanners.isEmpty { await refreshScanners() }
+                let c = place.isEmpty ? center : (await geocode(place) ?? center)
+                if let f = scanners.min(by: { $0.coord.distance(to: c) < $1.coord.distance(to: c) }) { listen(f); fly(to: f.coord, distance: 30_000, pitch: 40) } else { show("No scanner feeds resolved") } }
+        case .spaceWeather:
+            Task { await refreshSpace(); show("Kp \(String(format: "%.1f", space.kp)) · \(space.stormLevel) · X-ray \(space.xrayClass)") ; showSpace = true }
+        case .terrainProfile: loadProfile()
         case .replayLaunch:
             if let l = launches.filter({ $0.net < Date() }).last ?? launches.first { startReplay(l) } else { show("No launch loaded") }
         case .unknown: show("Didn't catch that: “\(text)”")

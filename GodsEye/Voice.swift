@@ -118,6 +118,10 @@ enum VoiceCommand: Equatable {
     case radioNear(String)
     case issPass
     case replayLaunch
+    case radarToggle(Bool)
+    case listenScanner(String)
+    case spaceWeather
+    case terrainProfile
     case unknown
 
     static func parse(_ raw: String) -> VoiceCommand {
@@ -144,6 +148,14 @@ enum VoiceCommand: Equatable {
             for p in ["play a news radio station near", "play radio near", "play a radio station near", "radio station near", "radio near", "tune to", "play radio"] { place = place.replacingOccurrences(of: p, with: "") }
             return .radioNear(place.trimmingCharacters(in: .whitespaces).ifEmpty("here"))
         }
+        if has("radar") && has("turn on", "show", "turn off", "hide", "enable", "disable") { return .radarToggle(!has("turn off", "hide", "disable")) }
+        if has("scanner", "dispatch", "listen to police", "listen to fire") {
+            var place = t
+            for p in ["listen to the police scanner near", "listen to police scanner near", "play the scanner near", "scanner near", "police scanner", "fire scanner", "listen to police", "listen to fire", "scanner", "dispatch", "near", "play", "listen to"] { place = place.replacingOccurrences(of: p, with: " ") }
+            return .listenScanner(place.trimmingCharacters(in: .whitespaces))
+        }
+        if has("space weather", "aurora", "geomagnetic", "solar storm", "kp index") { return .spaceWeather }
+        if has("terrain profile", "elevation profile", "profile between") { return .terrainProfile }
         if has("iss pass", "when does the iss", "next iss", "space station pass") { return .issPass }
         if has("replay the launch", "launch replay", "replay launch", "play the launch") { return .replayLaunch }
         if has("mark this", "annotate", "drop a pin", "mark here") {
@@ -153,7 +165,7 @@ enum VoiceCommand: Equatable {
         if has("reset globe", "reset the globe", "zoom out to a globe", "globe view", "back to earth") { return .resetGlobe }
         if has("stop tracking", "untrack", "release target") { return .stopTracking }
         if has("cockpit", "chase cam", "chase camera") { return .cockpit(!has("exit", "leave", "off")) }
-        if has("nearest camera", "nearest cam", "closest camera") { return .nearestCamera }
+        if has("nearest camera", "nearest cam", "closest camera", "street view", "look through a camera") { return .nearestCamera }
         if has("timeline", "playback", "replay") { return .timeline }
         if has("night vision", "nvg") { return .sensor(.nvg) }
         if has("thermal", "flir", "infrared") { return .sensor(.flir) }

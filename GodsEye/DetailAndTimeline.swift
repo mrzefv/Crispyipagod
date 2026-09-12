@@ -91,7 +91,30 @@ struct DetailSheet: View {
     }
 
     @ViewBuilder private var extraRow: some View {
+        if entity.kind == .camera, let cam = s.cameras.first(where: { "cam-\($0.id)" == entity.id }) {
+            HStack(spacing: 8) {
+                ActionChip(icon: cam.isLiveVideo ? "play.tv" : "eye", title: "Live view", active: true) { s.openLive(cam) }
+                ActionChip(icon: s.cctv.watching.contains(cam.id) ? "record.circle.fill" : "record.circle",
+                           title: s.cctv.watching.contains(cam.id) ? "Watching" : "Watch", active: s.cctv.watching.contains(cam.id)) { s.cctv.toggleWatch(cam.id) }
+                ActionChip(icon: "film.stack", title: "\(s.cctv.frameCounts[cam.id] ?? 0) frames", active: false) { s.openLive(cam) }
+            }
+        }
         HStack(spacing: 8) {
+            if entity.kind == .place, s.layers.contains(.radar) {
+                ActionChip(icon: "cloud.bolt.rain", title: "Track storm", active: false) { s.selected = nil; s.trackStorm(at: entity.coord) }
+            }
+            if entity.kind == .station, let w = s.stations.first(where: { "wx-\($0.id)" == entity.id }) {
+                ActionChip(icon: "chart.xyaxis.line", title: "24h series", active: false) { s.selected = nil; Task { try? await Task.sleep(nanoseconds: 400_000_000); s.showStation = w } }
+            }
+            if entity.kind == .scanner, let f = s.scanners.first(where: { "scan-\($0.id)" == entity.id }) {
+                ActionChip(icon: "speaker.wave.2", title: s.scannerNow?.id == f.id ? "Listening" : "Listen", active: s.scannerNow?.id == f.id) { s.listen(f) }
+            }
+            if entity.kind == .airport {
+                ActionChip(icon: "airplane.arrival", title: "Runways", active: s.layers.contains(.airport)) { s.layers.insert(.airport); s.fly(to: entity.coord, distance: 6_000, pitch: 50) }
+            }
+            if entity.kind == .peak || entity.kind == .place {
+                ActionChip(icon: "mountain.2", title: "Elevation", active: false) { Task { if let e = await s.elevation(at: entity.coord) { s.show(String(format: "Elevation %.0f m · %.0f ft", e, e * 3.281)) } } }
+            }
             if entity.kind == .launch, let l = s.launches.first(where: { "ll-\($0.id)" == entity.id }) {
                 ActionChip(icon: "play.rectangle", title: "Replay ascent", active: false) { s.startReplay(l) }
             }

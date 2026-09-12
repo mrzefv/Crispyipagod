@@ -6,6 +6,7 @@ import SwiftUI
 
 enum Layer: String, CaseIterable, Identifiable, Codable {
     case flights, military, ships, satellites, quakes, launches, cctv, traffic, fires, bikeshare, radio, infra, cables, airport
+    case radar, satir, wind, power, rail, trains, airports, stations, alerts, space, scanner, peaks
     var id: String { rawValue }
 
     var title: String {
@@ -16,7 +17,7 @@ enum Layer: String, CaseIterable, Identifiable, Codable {
         case .satellites: return "Satellites"
         case .quakes: return "Earthquakes (24h)"
         case .launches: return "Space Missions"
-        case .cctv: return "Public CCTV (London)"
+        case .cctv: return "Public CCTV"
         case .traffic: return "Traffic Flow"
         case .fires: return "Active Fires (24h)"
         case .bikeshare: return "Bikeshare"
@@ -24,6 +25,18 @@ enum Layer: String, CaseIterable, Identifiable, Codable {
         case .infra: return "Infrastructure"
         case .cables: return "Submarine Cables"
         case .airport: return "Airport Detail"
+        case .radar: return "Weather Radar"
+        case .satir: return "Satellite IR Clouds"
+        case .wind: return "Wind Vectors"
+        case .power: return "Power Grid"
+        case .rail: return "Rail Network"
+        case .trains: return "Live Trains"
+        case .airports: return "Airports"
+        case .stations: return "Weather Stations"
+        case .alerts: return "NWS Alerts & Incidents"
+        case .space: return "Sun & Space Weather"
+        case .scanner: return "Scanner Feeds"
+        case .peaks: return "Peaks & Terrain"
         }
     }
     var icon: String {
@@ -42,6 +55,18 @@ enum Layer: String, CaseIterable, Identifiable, Codable {
         case .infra: return "server.rack"
         case .cables: return "cable.connector"
         case .airport: return "airplane.arrival"
+        case .radar: return "cloud.rain"
+        case .satir: return "cloud.fill"
+        case .wind: return "wind"
+        case .power: return "bolt"
+        case .rail: return "tram.fill"
+        case .trains: return "train.side.front.car"
+        case .airports: return "airplane.circle"
+        case .stations: return "thermometer.medium"
+        case .alerts: return "exclamationmark.triangle"
+        case .space: return "sun.max"
+        case .scanner: return "antenna.radiowaves.left.and.right"
+        case .peaks: return "mountain.2"
         }
     }
     var source: String {
@@ -52,7 +77,7 @@ enum Layer: String, CaseIterable, Identifiable, Codable {
         case .satellites: return "CelesTrak GP · SGP4"
         case .quakes: return "USGS"
         case .launches: return "Launch Library 2"
-        case .cctv: return "TfL JamCams"
+        case .cctv: return "TfL · NYC DOT · Caltrans · Austin"
         case .traffic: return "Apple Maps"
         case .fires: return "NASA FIRMS (key)"
         case .bikeshare: return "GBFS"
@@ -60,6 +85,18 @@ enum Layer: String, CaseIterable, Identifiable, Codable {
         case .infra: return "OSM Overpass"
         case .cables: return "TeleGeography"
         case .airport: return "OSM Overpass"
+        case .radar: return "RainViewer"
+        case .satir: return "RainViewer"
+        case .wind: return "Open-Meteo"
+        case .power: return "OSM Overpass"
+        case .rail: return "OSM Overpass"
+        case .trains: return "Amtrak · Digitraffic"
+        case .airports: return "OurAirports"
+        case .stations: return "aviationweather.gov · NDBC"
+        case .alerts: return "NWS · Cal Fire"
+        case .space: return "NOAA SWPC"
+        case .scanner: return "Broadcastify"
+        case .peaks: return "OSM · Open-Meteo"
         }
     }
     var needsKey: Bool { self == .ships || self == .fires }
@@ -84,14 +121,17 @@ enum SensorMode: String, CaseIterable, Identifiable, Codable {
 }
 
 enum Mission: String, CaseIterable, Identifiable {
-    case liveContacts, space, environmental, london
+    case liveContacts, space, environmental, london, weather, grid, situational
     var id: String { rawValue }
     var title: String {
         switch self {
         case .liveContacts: return "Live Contacts"
-        case .space: return "Space Missions"
+        case .space: return "Space & Sun"
         case .environmental: return "Environmental"
-        case .london: return "London Watch"
+        case .london: return "City Watch"
+        case .weather: return "Weather Ops"
+        case .grid: return "Grid & Rail"
+        case .situational: return "Situational"
         }
     }
     var icon: String {
@@ -100,14 +140,20 @@ enum Mission: String, CaseIterable, Identifiable {
         case .space: return "sparkles"
         case .environmental: return "globe.europe.africa"
         case .london: return "video.circle"
+        case .weather: return "cloud.bolt.rain"
+        case .grid: return "bolt.horizontal"
+        case .situational: return "exclamationmark.triangle"
         }
     }
     var layers: Set<Layer> {
         switch self {
-        case .liveContacts: return [.flights, .military, .ships]
-        case .space: return [.satellites, .launches]
-        case .environmental: return [.quakes, .launches]
+        case .liveContacts: return [.flights, .military, .ships, .trains]
+        case .space: return [.satellites, .launches, .space]
+        case .environmental: return [.quakes, .fires, .alerts]
         case .london: return [.cctv, .traffic, .flights]
+        case .weather: return [.radar, .wind, .stations, .alerts]
+        case .grid: return [.power, .rail, .trains, .infra]
+        case .situational: return [.alerts, .fires, .scanner, .cctv, .flights]
         }
     }
     var camera: (lat: Double, lon: Double, distance: Double, pitch: Double) {
@@ -116,6 +162,9 @@ enum Mission: String, CaseIterable, Identifiable {
         case .space: return (20, -30, 26_000_000, 0)
         case .environmental: return (10, 140, 22_000_000, 0)
         case .london: return (51.505, -0.09, 22_000, 55)
+        case .weather: return (36, -95, 3_500_000, 0)
+        case .grid: return (40.75, -74.0, 120_000, 0)
+        case .situational: return (34.05, -118.25, 400_000, 30)
         }
     }
 }
@@ -402,23 +451,44 @@ struct TfLPlace: Decodable {
 struct Camera: Identifiable, Equatable {
     let id: String
     let name: String
+    let source: String          // "TfL", "NYC DOT", "Caltrans", "Austin"
     let lat: Double
     let lon: Double
-    let imageURL: String
-    let videoURL: String?
+    let imageURL: String        // still snapshot (refreshable)
+    let videoURL: String?       // short MP4 clip (TfL) — looped
+    let streamURL: String?      // HLS live stream (Caltrans)
     let available: Bool
+    let heading: Double?        // published direction if any
+    let region: String
     var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+    var isLiveVideo: Bool { streamURL != nil }
+
+    init(id: String, name: String, source: String, lat: Double, lon: Double, imageURL: String, videoURL: String? = nil, streamURL: String? = nil, available: Bool = true, heading: Double? = nil, region: String = "") {
+        self.id = id; self.name = name; self.source = source; self.lat = lat; self.lon = lon
+        self.imageURL = imageURL; self.videoURL = videoURL; self.streamURL = streamURL
+        self.available = available; self.heading = heading; self.region = region
+    }
 
     init?(_ p: TfLPlace) {
         let props = Dictionary(p.additionalProperties.map { ($0.key, $0.value) }, uniquingKeysWith: { a, _ in a })
         guard let img = props["imageUrl"], !img.isEmpty else { return nil }
-        id = p.id
-        name = p.commonName
-        lat = p.lat
-        lon = p.lon
-        imageURL = img
-        videoURL = props["videoUrl"]
-        available = (props["available"] ?? "true").lowercased() == "true"
+        self.init(id: "tfl-" + p.id, name: p.commonName, source: "TfL", lat: p.lat, lon: p.lon, imageURL: img,
+                  videoURL: props["videoUrl"], streamURL: nil,
+                  available: (props["available"] ?? "true").lowercased() == "true", heading: nil, region: "London")
+    }
+
+    static func headingFrom(_ dir: String?) -> Double? {
+        switch (dir ?? "").lowercased() {
+        case "north", "n": return 0
+        case "northeast", "ne": return 45
+        case "east", "e": return 90
+        case "southeast", "se": return 135
+        case "south", "s": return 180
+        case "southwest", "sw": return 225
+        case "west", "w": return 270
+        case "northwest", "nw": return 315
+        default: return nil
+        }
     }
 }
 
@@ -564,6 +634,195 @@ struct Weather: Equatable {
     }
 }
 
+// MARK: - Weather radar (RainViewer)
+
+struct RadarFrame: Identifiable, Equatable {
+    let time: Date
+    let path: String
+    let kind: String   // "radar" | "satellite"
+    var id: String { kind + path }
+}
+
+struct WindVector: Identifiable, Equatable {
+    let id: String
+    let lat: Double
+    let lon: Double
+    let speedKt: Double
+    let dirDeg: Double
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+}
+
+struct StormCell: Identifiable, Equatable {
+    let id: String
+    var lat: Double
+    var lon: Double
+    var speedKmh: Double
+    var headingDeg: Double
+    var intensity: Double
+    var history: [CLLocationCoordinate2D]
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+    static func == (a: StormCell, b: StormCell) -> Bool { a.id == b.id && a.lat == b.lat && a.lon == b.lon }
+}
+
+// MARK: - Power grid / rail / peaks (Overpass)
+
+struct PowerLine: Identifiable, Equatable {
+    let id: String
+    let voltage: Double
+    let name: String
+    let operatorName: String
+    let points: [CLLocationCoordinate2D]
+    static func == (a: PowerLine, b: PowerLine) -> Bool { a.id == b.id }
+    var color: Color {
+        switch voltage {
+        case ..<69_000: return .yellow
+        case ..<230_000: return .orange
+        case ..<400_000: return .red
+        default: return .purple
+        }
+    }
+}
+
+struct RailLine: Identifiable, Equatable {
+    let id: String
+    let kind: String   // rail | subway | light_rail | tram | yard
+    let name: String
+    let points: [CLLocationCoordinate2D]
+    static func == (a: RailLine, b: RailLine) -> Bool { a.id == b.id }
+}
+
+struct RailStation: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let lat: Double
+    let lon: Double
+    let kind: String
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+}
+
+struct Peak: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let lat: Double
+    let lon: Double
+    let elevationM: Double
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+}
+
+// MARK: - Trains
+
+struct Train: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let operatorName: String
+    var lat: Double
+    var lon: Double
+    var speedKmh: Double
+    var heading: Double
+    var status: String
+    var nextStop: String
+    var seenAt: Date
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+}
+
+// MARK: - Airports (OurAirports)
+
+struct Airport: Identifiable, Equatable {
+    let id: String     // ident (ICAO or local)
+    let iata: String
+    let name: String
+    let type: String   // large_airport | medium_airport
+    let lat: Double
+    let lon: Double
+    let elevationFt: Double
+    let city: String
+    let country: String
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+}
+
+// MARK: - Weather stations (METAR + NDBC)
+
+struct WxStation: Identifiable, Equatable {
+    let id: String
+    let name: String
+    let kind: String   // METAR | BUOY
+    let lat: Double
+    let lon: Double
+    let tempC: Double?
+    let windDir: Double?
+    let windKt: Double?
+    let pressureHpa: Double?
+    let visibilityMi: Double?
+    let raw: String
+    let time: Date?
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+}
+
+// MARK: - Alerts & incidents
+
+struct HazardAlert: Identifiable, Equatable {
+    let id: String
+    let source: String   // NWS | CalFire
+    let event: String
+    let headline: String
+    let severity: String
+    let area: String
+    let starts: Date?
+    let ends: Date?
+    let lat: Double
+    let lon: Double
+    let rings: [[CLLocationCoordinate2D]]
+    let url: String?
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+    static func == (a: HazardAlert, b: HazardAlert) -> Bool { a.id == b.id }
+    var color: Color {
+        switch severity.lowercased() {
+        case "extreme": return .purple
+        case "severe": return .red
+        case "moderate": return .orange
+        default: return .yellow
+        }
+    }
+}
+
+// MARK: - Scanner feeds
+
+struct ScannerFeed: Identifiable, Equatable, Codable {
+    let id: String
+    let title: String
+    let genre: String
+    var lat: Double
+    var lon: Double
+    var listeners: Int
+    var streamURL: String { "https://broadcastify.cdnstream1.com/\(id)" }
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+}
+
+// MARK: - Space weather
+
+struct SpaceWeather: Equatable {
+    var kp: Double = 0
+    var kpTime: Date? = nil
+    var solarWindKmS: Double = 0
+    var density: Double = 0
+    var xrayFlux: Double = 0
+    var xrayClass: String = "—"
+    var aurora: [(lat: Double, lon: Double, prob: Double)] = []
+    var fetched: Date? = nil
+    static func == (a: SpaceWeather, b: SpaceWeather) -> Bool { a.kp == b.kp && a.fetched == b.fetched }
+    var stormLevel: String {
+        switch kp { case ..<4: return "QUIET"; case ..<5: return "ACTIVE"; case ..<6: return "G1 MINOR"; case ..<7: return "G2 MODERATE"; case ..<8: return "G3 STRONG"; case ..<9: return "G4 SEVERE"; default: return "G5 EXTREME" }
+    }
+}
+
+struct AuroraPoint: Identifiable, Equatable {
+    let id: Int
+    let lat: Double
+    let lon: Double
+    let prob: Double
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+}
+
 // MARK: - Unified entity (what the detail sheet renders)
 
 struct MetaRow: Identifiable, Equatable {
@@ -576,6 +835,7 @@ struct MetaRow: Identifiable, Equatable {
 struct Entity: Identifiable, Equatable {
     enum Kind: String, Codable, CaseIterable {
         case aircraft, military, ship, earthquake, satellite, launch, camera, place, fire, bike, radio, infra, cable
+        case train, airport, station, alert, scanner, peak, storm
         var icon: String {
             switch self {
             case .aircraft: return "airplane"
@@ -591,6 +851,13 @@ struct Entity: Identifiable, Equatable {
             case .radio: return "radio"
             case .infra: return "server.rack"
             case .cable: return "cable.connector"
+            case .train: return "train.side.front.car"
+            case .airport: return "airplane.circle"
+            case .station: return "thermometer.medium"
+            case .alert: return "exclamationmark.triangle"
+            case .scanner: return "antenna.radiowaves.left.and.right"
+            case .peak: return "mountain.2"
+            case .storm: return "cloud.bolt.rain"
             }
         }
         var label: String {
@@ -608,6 +875,13 @@ struct Entity: Identifiable, Equatable {
             case .radio: return "RADIO"
             case .infra: return "INFRA"
             case .cable: return "CABLE"
+            case .train: return "RAIL"
+            case .airport: return "AIRPORT"
+            case .station: return "WX STATION"
+            case .alert: return "ALERT"
+            case .scanner: return "SCANNER"
+            case .peak: return "TERRAIN"
+            case .storm: return "STORM CELL"
             }
         }
         var color: Color {
@@ -625,9 +899,16 @@ struct Entity: Identifiable, Equatable {
             case .radio: return .yellow
             case .infra: return .teal
             case .cable: return .indigo
+            case .train: return Color(red: 0.9, green: 0.5, blue: 1.0)
+            case .airport: return Color(red: 0.6, green: 0.9, blue: 1.0)
+            case .station: return Color(red: 0.6, green: 1.0, blue: 0.9)
+            case .alert: return .red
+            case .scanner: return Color(red: 1.0, green: 0.85, blue: 0.3)
+            case .peak: return Color(red: 0.8, green: 0.75, blue: 0.6)
+            case .storm: return Color(red: 0.4, green: 0.7, blue: 1.0)
             }
         }
-        var trackable: Bool { self == .aircraft || self == .military || self == .ship || self == .satellite }
+        var trackable: Bool { self == .aircraft || self == .military || self == .ship || self == .satellite || self == .train || self == .storm }
     }
 
     let id: String
@@ -724,17 +1005,21 @@ struct Entity: Identifiable, Equatable {
             id: "cam-\(cam.id)",
             kind: .camera,
             title: cam.name,
-            subtitle: cam.available ? "TfL JamCam · live still" : "TfL JamCam · offline",
-            summary: "Public traffic camera. Image refreshes every few minutes; position is published, view direction is estimated.",
+            subtitle: "\(cam.source) · \(cam.region) · " + (cam.isLiveVideo ? "HLS live" : cam.videoURL != nil ? "clip + stills" : "stills") + (cam.available ? "" : " · offline"),
+            summary: cam.isLiveVideo ? "Public camera with a live video stream." : "Public traffic camera. Stills refresh every few seconds to minutes; position is published, view direction is \(cam.heading == nil ? "estimated" : "published").",
             lat: cam.lat, lon: cam.lon, time: nil,
             meta: [
                 MetaRow("Camera ID", cam.id),
-                MetaRow("Available", cam.available ? "yes" : "no"),
-                MetaRow("Source", "TfL Unified API")
+                MetaRow("Source", cam.source),
+                MetaRow("Region", cam.region),
+                MetaRow("Direction", cam.heading.map { "\(Int($0))°" } ?? "estimated"),
+                MetaRow("Live video", cam.isLiveVideo ? "yes (HLS)" : "no"),
+                MetaRow("Available", cam.available ? "yes" : "no")
             ],
-            url: cam.videoURL ?? cam.imageURL,
+            url: cam.streamURL ?? cam.videoURL ?? cam.imageURL,
             viewDistance: 1_200,
-            imageURL: cam.imageURL)
+            imageURL: cam.imageURL,
+            heading: cam.heading ?? 0)
     }
 
     static func from(_ f: Fire) -> Entity {
@@ -787,6 +1072,67 @@ struct Entity: Identifiable, Equatable {
             meta: n.tags.sorted { $0.key < $1.key }.prefix(10).map { MetaRow($0.key, $0.value) } + [MetaRow("Source", "OpenStreetMap")],
             url: "https://www.openstreetmap.org/\(n.id.replacingOccurrences(of: "-", with: "/"))",
             viewDistance: 4_000)
+    }
+
+    static func from(_ t: Train) -> Entity {
+        Entity(id: "train-\(t.id)", kind: .train, title: t.name, subtitle: t.operatorName,
+               summary: "\(Int(t.speedKmh)) km/h · \(t.status) · next \(t.nextStop)",
+               lat: t.lat, lon: t.lon, time: t.seenAt,
+               meta: [MetaRow("Operator", t.operatorName), MetaRow("Speed", "\(Int(t.speedKmh)) km/h"), MetaRow("Heading", "\(Int(t.heading))°"),
+                      MetaRow("Status", t.status), MetaRow("Next stop", t.nextStop), MetaRow("Source", t.operatorName == "Amtrak" ? "Amtraker" : "Digitraffic")],
+               url: nil, viewDistance: 12_000, imageURL: nil, heading: t.heading)
+    }
+
+    static func from(_ a: Airport) -> Entity {
+        Entity(id: "apt-\(a.id)", kind: .airport, title: a.iata.isEmpty ? a.id : "\(a.iata) · \(a.id)", subtitle: a.name,
+               summary: "\(a.type.replacingOccurrences(of: "_", with: " ")) · \(a.city), \(a.country) · elev \(Int(a.elevationFt)) ft",
+               lat: a.lat, lon: a.lon, time: nil,
+               meta: [MetaRow("ICAO", a.id), MetaRow("IATA", a.iata.isEmpty ? "—" : a.iata), MetaRow("Type", a.type), MetaRow("Elevation", "\(Int(a.elevationFt)) ft"),
+                      MetaRow("City", a.city), MetaRow("Country", a.country), MetaRow("Source", "OurAirports")],
+               url: "https://ourairports.com/airports/\(a.id)/", viewDistance: 9_000)
+    }
+
+    static func from(_ w: WxStation) -> Entity {
+        let t = w.tempC.map { String(format: "%.0f°C", $0) } ?? "—"
+        let wind = (w.windDir != nil && w.windKt != nil) ? String(format: "%03.0f°/%.0fkt", w.windDir!, w.windKt!) : "—"
+        let p = w.pressureHpa.map { String(format: "%.0f hPa", $0) } ?? "—"
+        return Entity(id: "wx-\(w.id)", kind: .station, title: w.id, subtitle: "\(w.kind) · \(w.name)",
+               summary: "\(t) · wind \(wind) · \(p)" + (w.visibilityMi.map { String(format: " · vis %.0f mi", $0) } ?? ""),
+               lat: w.lat, lon: w.lon, time: w.time,
+               meta: [MetaRow("Temperature", t), MetaRow("Wind", wind), MetaRow("Pressure", p), MetaRow("Raw", w.raw), MetaRow("Source", w.kind == "METAR" ? "aviationweather.gov" : "NOAA NDBC")],
+               url: nil, viewDistance: 20_000)
+    }
+
+    static func from(_ h: HazardAlert) -> Entity {
+        Entity(id: "alert-\(h.id)", kind: .alert, title: h.event, subtitle: "\(h.source) · \(h.severity) · \(h.area)",
+               summary: h.headline,
+               lat: h.lat, lon: h.lon, time: h.starts,
+               meta: [MetaRow("Severity", h.severity), MetaRow("Area", h.area), MetaRow("Starts", h.starts.map(Fmt.time) ?? "—"), MetaRow("Ends", h.ends.map(Fmt.time) ?? "—"), MetaRow("Source", h.source)],
+               url: h.url, viewDistance: 150_000)
+    }
+
+    static func from(_ f: ScannerFeed) -> Entity {
+        Entity(id: "scan-\(f.id)", kind: .scanner, title: f.title, subtitle: f.genre,
+               summary: "\(f.listeners) listening · live dispatch audio",
+               lat: f.lat, lon: f.lon, time: nil,
+               meta: [MetaRow("Feed ID", f.id), MetaRow("Genre", f.genre), MetaRow("Listeners", "\(f.listeners)"), MetaRow("Source", "Broadcastify")],
+               url: "https://www.broadcastify.com/listen/feed/\(f.id)", viewDistance: 40_000)
+    }
+
+    static func from(_ p: Peak) -> Entity {
+        Entity(id: "peak-\(p.id)", kind: .peak, title: p.name, subtitle: "Summit",
+               summary: "\(Int(p.elevationM)) m · \(Int(p.elevationM * 3.281)) ft",
+               lat: p.lat, lon: p.lon, time: nil,
+               meta: [MetaRow("Elevation", "\(Int(p.elevationM)) m"), MetaRow("Source", "OpenStreetMap")],
+               url: nil, viewDistance: 6_000)
+    }
+
+    static func from(_ s: StormCell) -> Entity {
+        Entity(id: "storm-\(s.id)", kind: .storm, title: "Storm cell", subtitle: "Radar-derived (estimate)",
+               summary: String(format: "moving %03.0f° at %.0f km/h · intensity %.0f%%", s.headingDeg, s.speedKmh, s.intensity * 100),
+               lat: s.lat, lon: s.lon, time: Date(),
+               meta: [MetaRow("Heading", "\(Int(s.headingDeg))°"), MetaRow("Speed", "\(Int(s.speedKmh)) km/h"), MetaRow("Source", "RainViewer frames")],
+               url: nil, viewDistance: 120_000, imageURL: nil, heading: s.headingDeg)
     }
 
     static func from(_ c: Cable) -> Entity {

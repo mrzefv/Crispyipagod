@@ -46,6 +46,27 @@ Target: iOS 17+. Bundle id `party.mrvek.godseye`.
 
 **Widget extension:** the IPA now contains `GodsEye.app/PlugIns/GodsEyeWidgets.appex`. Your signer must sign the appex with the same identity (most do automatically).
 
+## v1.3 — CCTV
+
+- **Sources:** TfL JamCams (London, MP4 clip + still), NYC DOT (~900 stills), Caltrans all 12 districts (stills + HLS live streams where published), Austin Mobility (stills). All keyless.
+- **Live street view:** full-screen `CameraLiveView` — HLS plays natively, TfL clips loop and reload every 20 s, stills refresh every 6 s. Sensor modes apply. Prev/Next sweeps around neighbouring cameras by bearing; Globe drops you at the camera's position looking along its published direction.
+- **Playback (hand-rolled):** `CamRecorder` snapshots every watched camera + the open one on a 10–60 s interval while the app runs, skipping unchanged frames, 400 frames/camera cap in Caches. Playback tab scrubs frames at 1–8×; Export stitches them into an H.264 MP4 via AVAssetWriter for sharing. Recordings are per-device — nothing leaves the phone.
+
+## v1.4 — situational awareness
+
+- **Weather radar** (RainViewer, keyless): 2 h history + 30 min nowcast, scrubbable in the Radar sheet and driven by the main Timeline cursor; satellite IR clouds; Open-Meteo wind vector grid. Tiles are composited per-viewport and pinned with `MapProxy` (top-down camera). **Storm tracking:** tap a cell → "Track storm" — blob centroid across the last 3 frames → heading/speed, +60 min projection, camera lock.
+- **Lightning:** no free real-time feed exists (Blitzortung is participants-only, Vaisala/Earth Networks are paid). Hooks are in place; the layer ships off.
+- **Power grid** (Overpass): transmission lines colored by voltage class, plants, substations with operator/voltage tags.
+- **Rail** (Overpass): rail / subway / light-rail / tram / yards + stations. **Live trains:** Amtrak (Amtraker) + Finland (Digitraffic), trackable like aircraft.
+- **Airports** (OurAirports, medium+large) with ICAO/IATA; one-tap runway geometry.
+- **Seismic upgrade:** magnitude-scaled depth rings, 24 h / 7 d / 30 d windows, aftershock clustering in Settings.
+- **Weather stations:** METAR (aviationweather.gov) + NDBC buoys; tap → 24 h temp/wind/pressure charts (Open-Meteo).
+- **Alerts & incidents:** NWS active alerts as polygons (severity-colored, into the Timeline), Cal Fire incidents. Extreme alerts near you notify.
+- **Sun & space weather:** day/night terminator, subsolar point, NOAA OVATION aurora oval, Kp / solar wind / GOES X-ray class, satellites-visible-from-you (sunlit + you in darkness).
+- **Terrain:** OSM peaks with elevation, point elevation, terrain profile between the two Measure points (Swift Charts).
+- **Scanner:** Broadcastify top feeds (parsed from the public list, geocoded from titles) with one-tap listen, or enter any feed ID. This is the honest replacement for "police chases" — live dispatch audio for the area you're looking at.
+- New missions: Weather Ops · Grid & Rail · Situational.
+
 ## Feeds (no keys)
 
 | Layer | Source |

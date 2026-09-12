@@ -71,6 +71,32 @@ struct GlobeView: View {
                     QRSheet().presentationDetents([.medium]).presentationDragIndicator(.visible)
                 }
             Color.clear.frame(width: 0, height: 0)
+                .sheet(isPresented: $s.showRadar) {
+                    RadarSheet(r: s.radar)
+                        .presentationDetents([.fraction(0.4), .large])
+                        .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.4)))
+                        .presentationDragIndicator(.visible).presentationBackground(.ultraThinMaterial)
+                }
+            Color.clear.frame(width: 0, height: 0)
+                .sheet(item: $s.showStation) { st in
+                    StationSheet(station: st)
+                        .presentationDetents([.fraction(0.55), .large])
+                        .presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.55)))
+                        .presentationDragIndicator(.visible).presentationBackground(.ultraThinMaterial)
+                }
+            Color.clear.frame(width: 0, height: 0)
+                .sheet(isPresented: $s.showProfile) {
+                    ProfileSheet().presentationDetents([.fraction(0.45)]).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.45))).presentationDragIndicator(.visible).presentationBackground(.ultraThinMaterial)
+                }
+            Color.clear.frame(width: 0, height: 0)
+                .sheet(isPresented: $s.showSpace) {
+                    SpaceSheet().presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+                }
+            Color.clear.frame(width: 0, height: 0)
+                .sheet(isPresented: $s.showScanner) {
+                    ScannerSheet().presentationDetents([.fraction(0.5), .large]).presentationBackgroundInteraction(.enabled(upThrough: .fraction(0.5))).presentationDragIndicator(.visible).presentationBackground(.ultraThinMaterial)
+                }
+            Color.clear.frame(width: 0, height: 0)
                 .sheet(isPresented: $showModes) {
                     ModesSheet()
                         .presentationDetents([.medium])
@@ -85,6 +111,9 @@ struct GlobeView: View {
                 .presentationBackground(.ultraThinMaterial)
         }
         .onOpenURL { url in s.open(url: url) }
+        .fullScreenCover(item: $s.liveCamera) { cam in
+            CameraLiveView(rec: s.cctv, camera: cam).environmentObject(s)
+        }
     }
 
     // MARK: Map
@@ -190,7 +219,8 @@ struct GlobeView: View {
                     Annotation(cam.name, coordinate: cam.coord, anchor: .center) {
                         ZStack {
                             Circle().fill(Color.purple.opacity(0.25)).frame(width: 22, height: 22)
-                            Image(systemName: "video.fill").font(.system(size: 9, weight: .bold)).foregroundStyle(.purple)
+                            if s.cctv.watching.contains(cam.id) { Circle().stroke(Color.red, lineWidth: 1.5).frame(width: 22, height: 22) }
+                            Image(systemName: cam.isLiveVideo ? "video.fill" : "video").font(.system(size: 9, weight: .bold)).foregroundStyle(.purple)
                         }
                         .frame(width: 26, height: 26)
                         .contentShape(Rectangle())
@@ -354,6 +384,167 @@ struct GlobeView: View {
                     .annotationTitles(.hidden)
                 }
 
+                // Night side + aurora
+                if s.layers.contains(.space) {
+                    if s.night.count > 3 {
+                        MapPolygon(coordinates: s.night).foregroundStyle(Color.black.opacity(0.35)).stroke(Color.yellow.opacity(0.5), lineWidth: 1)
+                    }
+                    ForEach(s.auroraPoints) { a in
+                        Annotation("", coordinate: a.coord, anchor: .center) {
+                            Circle().fill(Color.green.opacity(min(0.85, a.prob / 100 + 0.15))).frame(width: 6, height: 6)
+                        }
+                        .annotationTitles(.hidden)
+                    }
+                    Annotation("SUN", coordinate: Solar.subsolar(Date()), anchor: .center) {
+                        Image(systemName: "sun.max.fill").foregroundStyle(.yellow).font(.title2)
+                    }
+                    .annotationTitles(.visible)
+                }
+
+                // Wind vectors
+                if s.layers.contains(.wind) {
+                    ForEach(s.winds) { w in
+                        Annotation("", coordinate: w.coord, anchor: .center) {
+                            VStack(spacing: 0) {
+                                Image(systemName: "arrow.up").font(.system(size: 12 + min(w.speedKt, 40) / 4, weight: .bold))
+                                    .rotationEffect(.degrees(w.dirDeg + 180))
+                                    .foregroundStyle(w.speedKt > 25 ? .orange : .cyan)
+                                Text("\(Int(w.speedKt))").font(.system(size: 8, weight: .bold, design: .monospaced)).foregroundStyle(.cyan)
+                            }
+                        }
+                        .annotationTitles(.hidden)
+                    }
+                }
+
+                // Storm cells
+                ForEach(s.storms) { st in
+                    if st.history.count > 1 { MapPolyline(coordinates: st.history).stroke(Entity.Kind.storm.color, lineWidth: 2) }
+                    MapPolyline(coordinates: [st.coord, st.coord.moved(meters: st.speedKmh / 3.6 * 3600, bearing: st.headingDeg)])
+                        .stroke(Entity.Kind.storm.color.opacity(0.6), style: StrokeStyle(lineWidth: 2, dash: [6, 6]))
+                    Annotation("+60 min", coordinate: st.coord.moved(meters: st.speedKmh / 3.6 * 3600, bearing: st.headingDeg), anchor: .center) {
+                        Circle().stroke(Entity.Kind.storm.color, lineWidth: 1.5).frame(width: 14, height: 14)
+                    }
+                    Annotation("", coordinate: st.coord, anchor: .center) {
+                        Image(systemName: "cloud.bolt.rain.fill").foregroundStyle(Entity.Kind.storm.color).font(.title3)
+                            .frame(width: 30, height: 30).contentShape(Rectangle())
+                            .onTapGesture { s.select(Entity.from(st)) }
+                    }
+                    .annotationTitles(.hidden)
+                }
+
+                // Power grid
+                if s.layers.contains(.power), s.distance < 250_000 {
+                    ForEach(s.powerLines) { l in
+                        MapPolyline(coordinates: l.points).stroke(l.color.opacity(0.8), lineWidth: l.voltage >= 230_000 ? 2.5 : 1.5)
+                    }
+                    ForEach(s.powerNodes) { n in
+                        Annotation(n.name, coordinate: n.coord, anchor: .center) {
+                            Image(systemName: n.kind.icon).font(.system(size: 10, weight: .bold)).foregroundStyle(.yellow)
+                                .frame(width: 22, height: 22).contentShape(Rectangle())
+                                .onTapGesture { s.select(Entity.from(n)) }
+                        }
+                        .annotationTitles(s.distance < 40_000 && s.showLabels ? .visible : .hidden)
+                    }
+                }
+
+                // Rail
+                if s.layers.contains(.rail), s.distance < 150_000 {
+                    ForEach(s.railLines) { l in
+                        MapPolyline(coordinates: l.points)
+                            .stroke(l.kind == "yard" ? Color.gray : l.kind == "subway" ? Color.orange : l.kind == "tram" || l.kind == "light_rail" ? Color.mint : Entity.Kind.train.color,
+                                    style: StrokeStyle(lineWidth: l.kind == "yard" ? 1 : 2, dash: l.kind == "rail" ? [] : [4, 3]))
+                    }
+                    ForEach(s.railStations) { st in
+                        Annotation(st.name, coordinate: st.coord, anchor: .center) {
+                            Circle().fill(.white).frame(width: 6, height: 6).overlay(Circle().stroke(Entity.Kind.train.color, lineWidth: 1.5)).frame(width: 18, height: 18).contentShape(Rectangle())
+                                .onTapGesture { s.select(Entity.place(lat: st.lat, lon: st.lon, name: st.name, detail: "Rail \(st.kind)", distance: 3_000)) }
+                        }
+                        .annotationTitles(s.distance < 25_000 && s.showLabels ? .visible : .hidden)
+                    }
+                }
+
+                // Live trains
+                ForEach(s.visibleTrains) { t in
+                    Annotation(t.name, coordinate: t.coord, anchor: .center) {
+                        MarkerGlyph(system: "train.side.front.car", color: Entity.Kind.train.color, size: 12, rotation: 0, id: t.id, tracked: s.trackedID == "train-\(t.id)", detection: s.detection)
+                            .onTapGesture { s.select(Entity.from(t)) }
+                    }
+                    .annotationTitles(s.distance < 600_000 && s.showLabels ? .visible : .hidden)
+                }
+
+                // Airports
+                ForEach(s.visibleAirports) { a in
+                    Annotation(a.iata.isEmpty ? a.id : a.iata, coordinate: a.coord, anchor: .center) {
+                        Image(systemName: "airplane.circle").font(.system(size: a.type == "large_airport" ? 14 : 10)).foregroundStyle(Entity.Kind.airport.color)
+                            .frame(width: 24, height: 24).contentShape(Rectangle())
+                            .onTapGesture { s.select(Entity.from(a)) }
+                    }
+                    .annotationTitles(s.showLabels && (a.type == "large_airport" || s.distance < 800_000) ? .visible : .hidden)
+                }
+
+                // Weather stations
+                ForEach(s.visibleStations) { w in
+                    Annotation(w.tempC.map { "\(Int($0))°" } ?? w.id, coordinate: w.coord, anchor: .center) {
+                        ZStack {
+                            Circle().fill(Entity.Kind.station.color.opacity(0.2)).frame(width: 18, height: 18)
+                            if let d = w.windDir, let k = w.windKt, k > 0 {
+                                Image(systemName: "arrow.up").font(.system(size: 9, weight: .bold)).rotationEffect(.degrees(d + 180)).foregroundStyle(Entity.Kind.station.color)
+                            } else {
+                                Image(systemName: w.kind == "BUOY" ? "water.waves" : "thermometer.medium").font(.system(size: 8)).foregroundStyle(Entity.Kind.station.color)
+                            }
+                        }
+                        .frame(width: 24, height: 24).contentShape(Rectangle())
+                        .onTapGesture { s.select(Entity.from(w)) }
+                    }
+                    .annotationTitles(s.showLabels && s.distance < 1_500_000 ? .visible : .hidden)
+                }
+
+                // Hazards
+                ForEach(s.visibleHazards) { h in
+                    ForEach(Array(h.rings.enumerated()), id: \.offset) { ring in
+                        MapPolygon(coordinates: ring.element).foregroundStyle(h.color.opacity(0.18)).stroke(h.color.opacity(0.8), lineWidth: 1.5)
+                    }
+                    Annotation(h.event, coordinate: h.coord, anchor: .center) {
+                        Image(systemName: h.source == "Cal Fire" ? "flame.fill" : "exclamationmark.triangle.fill").font(.system(size: 12)).foregroundStyle(h.color)
+                            .frame(width: 24, height: 24).contentShape(Rectangle())
+                            .onTapGesture { s.select(Entity.from(h)) }
+                    }
+                    .annotationTitles(s.distance < 2_000_000 && s.showLabels ? .visible : .hidden)
+                }
+
+                // Scanners
+                if s.layers.contains(.scanner) {
+                    ForEach(s.scanners) { f in
+                        Annotation(f.title, coordinate: f.coord, anchor: .center) {
+                            Image(systemName: s.scannerNow?.id == f.id ? "speaker.wave.2.fill" : "antenna.radiowaves.left.and.right").font(.system(size: 11, weight: .bold)).foregroundStyle(Entity.Kind.scanner.color)
+                                .frame(width: 24, height: 24).contentShape(Rectangle())
+                                .onTapGesture { s.select(Entity.from(f)) }
+                        }
+                        .annotationTitles(.hidden)
+                    }
+                }
+
+                // Peaks
+                if s.layers.contains(.peaks), s.distance < 300_000 {
+                    ForEach(s.peaks.prefix(120)) { p in
+                        Annotation("\(p.name) \(Int(p.elevationM))m", coordinate: p.coord, anchor: .bottom) {
+                            Image(systemName: "triangle.fill").font(.system(size: 9)).foregroundStyle(Entity.Kind.peak.color)
+                                .frame(width: 20, height: 20).contentShape(Rectangle())
+                                .onTapGesture { s.select(Entity.from(p)) }
+                        }
+                        .annotationTitles(s.distance < 80_000 && s.showLabels ? .visible : .hidden)
+                    }
+                }
+
+                // Quake depth rings (seismic upgrade)
+                if s.layers.contains(.quakes), s.distance < 3_000_000 {
+                    ForEach(s.visibleQuakes.filter { $0.mag >= 4 }) { q in
+                        MapCircle(center: q.coord, radius: pow(10, 0.5 * q.mag) * 120)
+                            .foregroundStyle((q.depthKm < 70 ? Color.red : q.depthKm < 300 ? Color.orange : Color.blue).opacity(0.12))
+                            .stroke((q.depthKm < 70 ? Color.red : q.depthKm < 300 ? Color.orange : Color.blue).opacity(0.6), lineWidth: 1)
+                    }
+                }
+
                 if s.location.coordinate != nil { UserAnnotation() }
             }
             .mapStyle(s.mapStyle)
@@ -361,6 +552,14 @@ struct GlobeView: View {
             .onMapCameraChange(frequency: .onEnd) { ctx in s.cameraChanged(ctx) }
             .onTapGesture { pt in
                 if let c = proxy.convert(pt, from: .local) { s.tapPoint(c) }
+            }
+            .overlay {
+                GeometryReader { geo in
+                    RadarOverlays(r: s.radar, proxy: proxy)
+                    .onAppear { s.viewWidth = geo.size.width }
+                    .onChange(of: geo.size.width) { _, w in s.viewWidth = w }
+                }
+                .allowsHitTesting(false)
             }
         }
         .ignoresSafeArea()
@@ -589,6 +788,14 @@ struct BottomPanel: View {
                 QuickAction(icon: "record.circle", title: "Scenes", active: s.scenePlaying) { s.showScenes = true }
                 QuickAction(icon: "qrcode", title: "QR") { s.showQR = true }
                 QuickAction(icon: "arrow.clockwise", title: "Refresh") { Task { await s.refreshAll() } }
+            }
+            HStack(spacing: 6) {
+                QuickAction(icon: "cloud.rain", title: "Radar", active: s.layers.contains(.radar)) { if !s.layers.contains(.radar) { s.layers.insert(.radar) }; s.showRadar = true }
+                QuickAction(icon: "sun.max", title: "Space", active: s.layers.contains(.space)) { if !s.layers.contains(.space) { s.layers.insert(.space) }; s.showSpace = true }
+                QuickAction(icon: "antenna.radiowaves.left.and.right", title: "Scanner", active: s.scannerNow != nil) { if !s.layers.contains(.scanner) { s.layers.insert(.scanner) }; s.showScanner = true }
+                QuickAction(icon: "chart.xyaxis.line", title: "Profile") { s.loadProfile() }
+                QuickAction(icon: "exclamationmark.triangle", title: "Alerts", active: s.layers.contains(.alerts)) { if s.layers.contains(.alerts) { s.layers.remove(.alerts) } else { s.layers.insert(.alerts) } }
+                QuickAction(icon: "train.side.front.car", title: "Trains", active: s.layers.contains(.trains)) { if s.layers.contains(.trains) { s.layers.remove(.trains) } else { s.layers.insert(.trains) } }
             }
         }
         .padding(10)
@@ -827,7 +1034,7 @@ struct LayersSheet: View {
         case .satellites: return "\(s.satellites.count) propagated"
         case .quakes: return "\(s.quakes.count) events / 24h"
         case .launches: return "\(s.launches.count) missions"
-        case .cctv: return "\(s.cameras.count) cameras"
+        case .cctv: return "\(s.cameras.count) cams · \(s.cameras.filter(\.isLiveVideo).count) live video · \(s.cctv.watching.count) watched"
         case .traffic: return "live flow on basemap"
         case .fires: return s.firmsKey.isEmpty ? "needs key" : "\(s.fires.count) detections"
         case .bikeshare: return s.bikes.isEmpty ? "zoom into a supported city" : "\(s.bikes.count) stations"
@@ -835,6 +1042,18 @@ struct LayersSheet: View {
         case .infra: return s.infra.isEmpty ? "zoom in (<400 km)" : "\(s.infra.count) sites"
         case .cables: return "\(s.cables.count) cables"
         case .airport: return s.airportFeatures.isEmpty ? "zoom in (<12 km)" : "\(s.airportFeatures.count) surfaces"
+        case .radar: return "\(s.radar.radarFrames.count) frames"
+        case .satir: return "\(s.radar.satFrames.count) frames"
+        case .wind: return "\(s.winds.count) vectors"
+        case .power: return s.powerLines.isEmpty ? "zoom in (<250 km)" : "\(s.powerLines.count) lines · \(s.powerNodes.count) nodes"
+        case .rail: return s.railLines.isEmpty ? "zoom in (<150 km)" : "\(s.railLines.count) tracks · \(s.railStations.count) stations"
+        case .trains: return "\(s.trains.count) live"
+        case .airports: return "\(s.airports.count) airports"
+        case .stations: return "\(s.stations.count) obs"
+        case .alerts: return "\(s.hazards.count) active"
+        case .space: return "Kp \(String(format: "%.1f", s.space.kp)) · \(s.space.stormLevel)"
+        case .scanner: return "\(s.scanners.count) feeds"
+        case .peaks: return s.peaks.isEmpty ? "zoom in (<300 km)" : "\(s.peaks.count) peaks"
         }
     }
 }
@@ -1156,5 +1375,22 @@ extension Color {
         if h.count == 6 { r = Double((v >> 16) & 0xff) / 255; g = Double((v >> 8) & 0xff) / 255; b = Double(v & 0xff) / 255 }
         else { r = 0.5; g = 0.5; b = 1.0 }
         self.init(red: r, green: g, blue: b)
+    }
+}
+
+
+struct RadarOverlays: View {
+    @EnvironmentObject var s: AppState
+    @ObservedObject var r: RadarEngine
+    let proxy: MapProxy
+    var body: some View {
+        ZStack {
+            if let c = r.satComposite, s.layers.contains(.satir) {
+                RadarOverlayView(composite: c, proxy: proxy, opacity: s.radarOpacity * 0.6, heading: s.heading, pitch: s.pitch)
+            }
+            if let c = r.composite, s.layers.contains(.radar) {
+                RadarOverlayView(composite: c, proxy: proxy, opacity: s.radarOpacity, heading: s.heading, pitch: s.pitch)
+            }
+        }
     }
 }

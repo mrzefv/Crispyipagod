@@ -130,6 +130,28 @@ struct SettingsView: View {
                 } header: { Text("Alerts") } footer: { Text("Checked every poll while the app is open, plus opportunistic background refresh (iOS decides when). Needs location for military/ISS alerts.") }
 
                 Section {
+                    LabeledContent("Cameras loaded", value: "\(s.cameras.count) (\(s.cameras.filter(\.isLiveVideo).count) HLS)")
+                    LabeledContent("Watched cameras", value: "\(s.cctv.watching.count)")
+                    LabeledContent("Stored frames", value: "\(s.cctv.frameCounts.values.reduce(0, +)) · \(Fmt.bytes(s.cctv.storageBytes))")
+                    Picker("Capture interval", selection: Binding(get: { Int(s.cctv.intervalSeconds) }, set: { s.cctv.intervalSeconds = UInt64($0); s.cctv.start() })) {
+                        Text("10s").tag(10); Text("20s").tag(20); Text("30s").tag(30); Text("60s").tag(60)
+                    }
+                    Button("Stop watching all") { s.cctv.watching = [] }.disabled(s.cctv.watching.isEmpty)
+                    Button("Delete all recordings", role: .destructive) { s.cctv.clearAll() }
+                } header: { Text("CCTV recorder") } footer: {
+                    Text("Public feeds keep no history, so GodsEye records its own: every watched camera (and whichever one is open) is snapshotted while the app runs, deduplicated, capped at 400 frames per camera. Playback scrubs those frames; Export stitches them into an MP4. Sources: TfL London, NYC DOT, Caltrans (12 districts, many with live HLS), Austin.")
+                }
+
+                Section {
+                    Picker("Earthquake window", selection: $s.quakeWindowDays) { Text("24 h").tag(1); Text("7 days").tag(7); Text("30 days (M2.5+)").tag(30) }
+                    ForEach(Array(s.quakeClusters.prefix(5).enumerated()), id: \.offset) { _, c in
+                        LabeledContent(String(format: "M%.1f %@", c.main.mag, c.main.place), value: "\(c.count) aftershocks")
+                            .font(.system(size: 12, design: .monospaced))
+                    }
+                    HStack { Text("Radar opacity"); Slider(value: $s.radarOpacity, in: 0.2...1) }
+                } header: { Text("Seismic & weather") } footer: { Text("Depth rings: red <70 km, orange <300 km, blue deep. Aftershocks = quakes within 100 km / 7 days of a M5+ mainshock. Radar pins to the map when the camera is top-down.") }
+
+                Section {
                     Toggle("Performance mode", isOn: $s.performanceMode)
                         .onChange(of: s.performanceMode) { _, _ in s.startPolling() }
                 } header: { Text("Performance") } footer: {
@@ -167,7 +189,9 @@ struct SettingsView: View {
                              "“Nearest camera” · “Reset globe” · “Timeline”",
                              "“Outline Texas” · “How far is LAX from DFW” · “Orbit”",
                              "“Play a radio station near Austin” · “When does the ISS pass”",
-                             "“Replay the launch”"], id: \.self) { t in
+                             "“Replay the launch”",
+                             "“Turn on radar” · “Space weather” · “Terrain profile”",
+                             "“Listen to the police scanner near Chicago”"], id: \.self) { t in
                         Text(t).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
                     }
                 }
@@ -179,7 +203,7 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    LabeledContent("App", value: "GodsEye 1.2.0")
+                    LabeledContent("App", value: "GodsEye 1.4.0")
                     LabeledContent("Build", value: "MRzefv")
                     LabeledContent("Deep links", value: "godseye://view?…")
                     LabeledContent("Inspired by", value: "gods-eye-view (MIT)")

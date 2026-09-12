@@ -85,8 +85,9 @@ final class Feeds {
         return try JSONDecoder().decode(AdsbResponse.self, from: d).ac.compactMap(\.value)
     }
 
-    func quakes() async throws -> [Quake] {
-        let d = try await fetch("https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson", cache: "quakes.json")
+    func quakes(days: Int = 1) async throws -> [Quake] {
+        let feed = days >= 30 ? "2.5_month" : days >= 7 ? "all_week" : "all_day"
+        let d = try await fetch("https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/\(feed).geojson", cache: "quakes-\(feed).json")
         return try JSONDecoder().decode(USGSFeed.self, from: d).features
             .compactMap(\.value).compactMap(Quake.init)
             .sorted { $0.time > $1.time }
@@ -117,9 +118,84 @@ final class Feeds {
         return out
     }
 
+    // MARK: Public cameras — TfL (London), NYC DOT, Caltrans (12 districts), Austin
+
     func cameras() async throws -> [Camera] {
-        let d = try await fetch("https://api.tfl.gov.uk/Place/Type/JamCam", cache: "jamcams.json")
-        return try JSONDecoder().decode([Lossy<TfLPlace>].self, from: d).compactMap(\.value).compactMap(Camera.init)
+        async let tfl = camerasTfL()
+        async let nyc = camerasNYC()
+        async let ca = camerasCaltrans()
+        async let atx = camerasAustin()
+        let all = await (tfl + nyc + ca + atx)
+        guard !all.isEmpty else { throw FeedError.badResponse }
+        var seen = Set<String>()
+        return all.filter { seen.insert($0.id).inserted }
+    }
+
+    private func camerasTfL() async -> [Camera] {
+        guard let d = try? await fetch("https://api.tfl.gov.uk/Place/Type/JamCam", cache: "cams-tfl.json"),
+              let list = try? JSONDecoder().decode([Lossy<TfLPlace>].self, from: d) else { return [] }
+        return list.compactMap(\.value).compactMap(Camera.init)
+    }
+
+    private func camerasNYC() async -> [Camera] {
+        guard let d = try? await fetch("https://webcams.nyctmc.org/api/cameras", cache: "cams-nyc.json"),
+              let arr = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { return [] }
+        return arr.compactMap { c in
+            guard let id = c["id"] as? String, let name = c["name"] as? String,
+                  let la = (c["latitude"] as? Double) ?? Double(c["latitude"] as? String ?? ""),
+                  let lo = (c["longitude"] as? Double) ?? Double(c["longitude"] as? String ?? "") else { return nil }
+            let online = ((c["isOnline"] as? String) ?? "\(c["isOnline"] as? Bool ?? true)").lowercased() == "true"
+            let img = (c["imageUrl"] as? String) ?? "https://webcams.nyctmc.org/api/cameras/\(id)/image"
+            return Camera(id: "nyc-\(id)", name: name, source: "NYC DOT", lat: la, lon: lo, imageURL: img,
+                          available: online, region: (c["area"] as? String) ?? "New York")
+        }
+    }
+
+    private func camerasCaltrans() async -> [Camera] {
+        await withTaskGroup(of: [Camera].self) { group in
+            for dist in 1...12 {
+                group.addTask { [self] in
+                    guard let d = try? await self.fetch("https://cwwp2.dot.ca.gov/data/d\(dist)/cctv/cctvStatusD\(String(format: "%02d", dist)).json", cache: "cams-ca-\(dist).json"),
+                          let root = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+                          let data = root["data"] as? [[String: Any]] else { return [] }
+                    return data.compactMap { row in
+                        guard let c = row["cctv"] as? [String: Any],
+                              let loc = c["location"] as? [String: Any],
+                              let la = Double(loc["latitude"] as? String ?? ""), let lo = Double(loc["longitude"] as? String ?? ""),
+                              let img = c["imageData"] as? [String: Any] else { return nil }
+                        let still = (img["static"] as? [String: Any])?["currentImageURL"] as? String ?? ""
+                        let stream = img["streamingVideoURL"] as? String
+                        guard !still.isEmpty || !(stream ?? "").isEmpty else { return nil }
+                        let name = [loc["route"] as? String, loc["locationName"] as? String].compactMap { $0 }.joined(separator: " · ")
+                        let idx = (c["index"] as? String) ?? UUID().uuidString
+                        return Camera(id: "ca-\(dist)-\(idx)", name: name.isEmpty ? "Caltrans D\(dist)" : name, source: "Caltrans",
+                                      lat: la, lon: lo, imageURL: still, videoURL: nil,
+                                      streamURL: (stream ?? "").isEmpty ? nil : stream,
+                                      available: ((c["inService"] as? String) ?? "true").lowercased() == "true",
+                                      heading: Camera.headingFrom(loc["direction"] as? String),
+                                      region: (loc["nearbyPlace"] as? String) ?? "California")
+                    }
+                }
+            }
+            var out: [Camera] = []
+            for await part in group { out += part }
+            return out
+        }
+    }
+
+    private func camerasAustin() async -> [Camera] {
+        guard let d = try? await fetch("https://data.austintexas.gov/resource/b4k4-adkb.json?$limit=2000", cache: "cams-atx.json"),
+              let arr = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { return [] }
+        return arr.compactMap { c in
+            guard let id = c["camera_id"] as? String else { return nil }
+            var la: Double? = Double(c["location_latitude"] as? String ?? ""), lo: Double? = Double(c["location_longitude"] as? String ?? "")
+            if la == nil, let loc = c["location"] as? [String: Any], let coords = loc["coordinates"] as? [Double], coords.count >= 2 { lo = coords[0]; la = coords[1] }
+            guard let lat = la, let lon = lo else { return nil }
+            let img = (c["screenshot_address"] as? String) ?? "https://cctv.austinmobility.io/image/\(id).jpg"
+            let status = ((c["camera_status"] as? String) ?? "TURNED_ON").uppercased()
+            return Camera(id: "atx-\(id)", name: (c["location_name"] as? String) ?? "Austin cam \(id)", source: "Austin", lat: lat, lon: lon,
+                          imageURL: img, available: status.contains("ON") || status.contains("ACTIVE"), region: "Austin")
+        }
     }
 
     // MARK: Flight trace history (globe.adsb.lol trace files, adsbexchange format)
@@ -368,6 +444,334 @@ final class Feeds {
         return text.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
     }
 
+    // MARK: RainViewer radar / satellite frames
+
+    func radarFrames() async throws -> [RadarFrame] {
+        let d = try await fetch("https://api.rainviewer.com/public/weather-maps.json", cache: "rainviewer.json")
+        guard let root = try JSONSerialization.jsonObject(with: d) as? [String: Any] else { throw FeedError.badResponse }
+        var out: [RadarFrame] = []
+        if let radar = root["radar"] as? [String: Any] {
+            for key in ["past", "nowcast"] {
+                for fr in (radar[key] as? [[String: Any]]) ?? [] {
+                    if let t = fr["time"] as? Double, let p = fr["path"] as? String { out.append(RadarFrame(time: Date(timeIntervalSince1970: t), path: p, kind: "radar")) }
+                }
+            }
+        }
+        if let sat = root["satellite"] as? [String: Any] {
+            for fr in (sat["infrared"] as? [[String: Any]]) ?? [] {
+                if let t = fr["time"] as? Double, let p = fr["path"] as? String { out.append(RadarFrame(time: Date(timeIntervalSince1970: t), path: p, kind: "satellite")) }
+            }
+        }
+        return out.sorted { $0.time < $1.time }
+    }
+
+    nonisolated static func tileURL(_ frame: RadarFrame, z: Int, x: Int, y: Int) -> URL? {
+        if frame.kind == "radar" { return URL(string: "https://tilecache.rainviewer.com\(frame.path)/256/\(z)/\(x)/\(y)/2/1_1.png") }
+        return URL(string: "https://tilecache.rainviewer.com\(frame.path)/256/\(z)/\(x)/\(y)/0/0_0.png")
+    }
+
+    // MARK: Open-Meteo wind grid + elevation
+
+    func windGrid(center c: CLLocationCoordinate2D, spanDeg: Double, n: Int = 7) async throws -> [WindVector] {
+        var lats: [String] = [], lons: [String] = []
+        for i in 0..<n { for j in 0..<n {
+            lats.append(String(format: "%.2f", c.latitude - spanDeg + 2 * spanDeg * Double(i) / Double(n - 1)))
+            lons.append(String(format: "%.2f", c.longitude - spanDeg * 1.4 + 2.8 * spanDeg * Double(j) / Double(n - 1)))
+        } }
+        let url = "https://api.open-meteo.com/v1/forecast?latitude=\(lats.joined(separator: ","))&longitude=\(lons.joined(separator: ","))&current=wind_speed_10m,wind_direction_10m&wind_speed_unit=kn"
+        let d = try await fetch(url, cache: "wind.json")
+        guard let arr = try JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { throw FeedError.badResponse }
+        return arr.enumerated().compactMap { i, e in
+            guard let la = e["latitude"] as? Double, let lo = e["longitude"] as? Double, let cur = e["current"] as? [String: Any] else { return nil }
+            return WindVector(id: "w\(i)", lat: la, lon: lo, speedKt: cur["wind_speed_10m"] as? Double ?? 0, dirDeg: cur["wind_direction_10m"] as? Double ?? 0)
+        }
+    }
+
+    func elevations(_ pts: [CLLocationCoordinate2D]) async throws -> [Double] {
+        var out: [Double] = []
+        for chunk in stride(from: 0, to: pts.count, by: 100).map({ Array(pts[$0..<min($0 + 100, pts.count)]) }) {
+            let la = chunk.map { String(format: "%.4f", $0.latitude) }.joined(separator: ",")
+            let lo = chunk.map { String(format: "%.4f", $0.longitude) }.joined(separator: ",")
+            let d = try await fetch("https://api.open-meteo.com/v1/elevation?latitude=\(la)&longitude=\(lo)", cache: "elev-\(chunk.count)-\(String(la.prefix(24)).replacingOccurrences(of: ",", with: "_")).json")
+            guard let root = try JSONSerialization.jsonObject(with: d) as? [String: Any], let e = root["elevation"] as? [Double] else { throw FeedError.badResponse }
+            out += e
+        }
+        return out
+    }
+
+    // MARK: Overpass: power grid, rail, peaks
+
+    func powerGrid(center c: CLLocationCoordinate2D, spanDeg: Double) async throws -> ([PowerLine], [InfraNode]) {
+        let s = max(0.15, min(spanDeg, 1.2))
+        let bbox = String(format: "%.3f,%.3f,%.3f,%.3f", c.latitude - s, c.longitude - s * 1.3, c.latitude + s, c.longitude + s * 1.3)
+        let q = """
+        [out:json][timeout:25];(
+          way["power"="line"](\(bbox));
+          nwr["power"~"^(plant|substation)$"](\(bbox));
+        );out center geom tags 700;
+        """
+        let r = try await overpass(q, cache: "power.json")
+        var lines: [PowerLine] = []
+        var nodes: [InfraNode] = []
+        for e in r.elements.compactMap(\.value) {
+            let t = e.tags ?? [:]
+            if e.type == "way", t["power"] == "line", let g = e.geometry, g.count > 1 {
+                let v = Double((t["voltage"] ?? "0").split(separator: ";").first.map(String.init) ?? "0") ?? 0
+                lines.append(PowerLine(id: "way-\(e.id)", voltage: v, name: t["name"] ?? t["ref"] ?? "Transmission line", operatorName: t["operator"] ?? "—",
+                                       points: g.map { CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) }))
+            } else if let la = e.lat ?? e.center?.lat, let lo = e.lon ?? e.center?.lon {
+                let kind: InfraNode.Kind = t["power"] == "plant" ? .power : .substation
+                nodes.append(InfraNode(id: "\(e.type)-\(e.id)", kind: kind, name: t["name"] ?? t["operator"] ?? kind.label.capitalized, lat: la, lon: lo, tags: t))
+            }
+        }
+        return (lines, nodes)
+    }
+
+    func rail(center c: CLLocationCoordinate2D, spanDeg: Double) async throws -> ([RailLine], [RailStation]) {
+        let s = max(0.1, min(spanDeg, 0.8))
+        let bbox = String(format: "%.3f,%.3f,%.3f,%.3f", c.latitude - s, c.longitude - s * 1.3, c.latitude + s, c.longitude + s * 1.3)
+        let q = """
+        [out:json][timeout:25];(
+          way["railway"~"^(rail|subway|light_rail|tram)$"]["service"!~"yard|siding|spur|crossover"](\(bbox));
+          way["railway"="rail"]["service"="yard"](\(bbox));
+          nwr["railway"~"^(station|halt)$"](\(bbox));
+        );out center geom tags 900;
+        """
+        let r = try await overpass(q, cache: "rail.json")
+        var lines: [RailLine] = []
+        var stations: [RailStation] = []
+        for e in r.elements.compactMap(\.value) {
+            let t = e.tags ?? [:]
+            if e.type == "way", let g = e.geometry, g.count > 1, let rw = t["railway"], rw != "station" {
+                let kind = t["service"] == "yard" ? "yard" : rw
+                lines.append(RailLine(id: "way-\(e.id)", kind: kind, name: t["name"] ?? t["ref"] ?? kind, points: g.map { CLLocationCoordinate2D(latitude: $0.lat, longitude: $0.lon) }))
+            } else if let la = e.lat ?? e.center?.lat, let lo = e.lon ?? e.center?.lon, ["station", "halt"].contains(t["railway"] ?? "") {
+                stations.append(RailStation(id: "\(e.type)-\(e.id)", name: t["name"] ?? "Station", lat: la, lon: lo, kind: t["station"] ?? t["railway"] ?? "station"))
+            }
+        }
+        return (lines, stations)
+    }
+
+    func peaks(center c: CLLocationCoordinate2D, spanDeg: Double) async throws -> [Peak] {
+        let s = max(0.1, min(spanDeg, 1.5))
+        let bbox = String(format: "%.3f,%.3f,%.3f,%.3f", c.latitude - s, c.longitude - s * 1.3, c.latitude + s, c.longitude + s * 1.3)
+        let q = "[out:json][timeout:20];node[\"natural\"=\"peak\"][\"ele\"](\(bbox));out tags 300;"
+        let r = try await overpass(q, cache: "peaks.json")
+        return r.elements.compactMap(\.value).compactMap { e in
+            guard let la = e.lat, let lo = e.lon, let t = e.tags, let ele = Double((t["ele"] ?? "").replacingOccurrences(of: " m", with: "")) else { return nil }
+            return Peak(id: "\(e.id)", name: t["name"] ?? "Peak", lat: la, lon: lo, elevationM: ele)
+        }.sorted { $0.elevationM > $1.elevationM }
+    }
+
+    // MARK: Live trains
+
+    func trains() async -> [Train] {
+        async let a = amtrak()
+        async let b = digitraffic()
+        return await a + b
+    }
+
+    private func amtrak() async -> [Train] {
+        guard let d = try? await fetch("https://api-v3.amtraker.com/v3/trains", cache: "amtrak.json"),
+              let root = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return [] }
+        var out: [Train] = []
+        for (_, v) in root {
+            for t in (v as? [[String: Any]]) ?? [] {
+                guard let la = t["lat"] as? Double, let lo = t["lon"] as? Double else { continue }
+                let num = "\(t["trainNum"] ?? "")"
+                let name = (t["routeName"] as? String) ?? "Amtrak \(num)"
+                let stations = t["stations"] as? [[String: Any]] ?? []
+                let next = stations.first(where: { ($0["status"] as? String) == "Enroute" })?["name"] as? String ?? stations.last?["name"] as? String ?? "—"
+                out.append(Train(id: "amtk-\(t["trainID"] ?? num)", name: "\(name) #\(num)", operatorName: "Amtrak", lat: la, lon: lo,
+                                 speedKmh: ((t["velocity"] as? Double) ?? 0) * 1.609, heading: Train.heading(from: t["heading"] as? String),
+                                 status: (t["trainState"] as? String) ?? "Active", nextStop: next, seenAt: Date()))
+            }
+        }
+        return out
+    }
+
+    private func digitraffic() async -> [Train] {
+        guard let d = try? await fetch("https://rata.digitraffic.fi/api/v1/train-locations/latest", cache: "digitraffic.json"),
+              let arr = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { return [] }
+        return arr.compactMap { t in
+            guard let loc = t["location"] as? [String: Any], let c = loc["coordinates"] as? [Double], c.count >= 2 else { return nil }
+            let num = "\(t["trainNumber"] ?? "")"
+            return Train(id: "vr-\(num)-\(t["departureDate"] ?? "")", name: "VR \(num)", operatorName: "VR (Finland)", lat: c[1], lon: c[0],
+                         speedKmh: (t["speed"] as? Double) ?? 0, heading: 0, status: "Active", nextStop: "—", seenAt: Date())
+        }
+    }
+
+    // MARK: Airports (OurAirports, medium+large only)
+
+    func airports() async throws -> [Airport] {
+        let d = try await fetch("https://davidmegginson.github.io/ourairports-data/airports.csv", cache: "airports.csv")
+        guard let text = String(data: d, encoding: .utf8) else { throw FeedError.badResponse }
+        var out: [Airport] = []
+        out.reserveCapacity(5000)
+        var first = true
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            if first { first = false; continue }
+            guard line.contains("large_airport") || line.contains("medium_airport") else { continue }
+            let c = Feeds.csvSplit(String(line))
+            guard c.count > 13, let la = Double(c[4]), let lo = Double(c[5]) else { continue }
+            out.append(Airport(id: c[1], iata: c[13], name: c[3], type: c[2], lat: la, lon: lo, elevationFt: Double(c[6]) ?? 0, city: c[10], country: c[8]))
+        }
+        return out
+    }
+
+    nonisolated static func csvSplit(_ line: String) -> [String] {
+        var out: [String] = [], cur = "", q = false
+        for ch in line {
+            if ch == "\"" { q.toggle() } else if ch == "," && !q { out.append(cur); cur = "" } else { cur.append(ch) }
+        }
+        out.append(cur)
+        return out
+    }
+
+    // MARK: METAR + NDBC buoys
+
+    func metars(center c: CLLocationCoordinate2D, spanDeg: Double) async throws -> [WxStation] {
+        let s = max(1.0, min(spanDeg, 8))
+        let bbox = String(format: "%.2f,%.2f,%.2f,%.2f", c.latitude - s, c.longitude - s * 1.4, c.latitude + s, c.longitude + s * 1.4)
+        let d = try await fetch("https://aviationweather.gov/api/data/metar?bbox=\(bbox)&format=json", cache: "metar.json")
+        guard let arr = try JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { throw FeedError.badResponse }
+        return arr.compactMap { m in
+            guard let id = m["icaoId"] as? String, let la = m["lat"] as? Double, let lo = m["lon"] as? Double else { return nil }
+            let temp = m["temp"] as? Double
+            let alt = m["altim"] as? Double
+            let t = (m["obsTime"] as? Double).map { Date(timeIntervalSince1970: $0) }
+            return WxStation(id: id, name: (m["name"] as? String) ?? id, kind: "METAR", lat: la, lon: lo, tempC: temp,
+                             windDir: (m["wdir"] as? Double) ?? Double("\(m["wdir"] ?? "")"), windKt: (m["wspd"] as? Double),
+                             pressureHpa: alt, visibilityMi: (m["visib"] as? Double) ?? Double("\(m["visib"] ?? "")".replacingOccurrences(of: "+", with: "")),
+                             raw: (m["rawOb"] as? String) ?? "", time: t)
+        }
+    }
+
+    func buoys() async throws -> [WxStation] {
+        let d = try await fetch("https://www.ndbc.noaa.gov/data/latest_obs/latest_obs.txt", cache: "ndbc.txt")
+        guard let text = String(data: d, encoding: .utf8) else { throw FeedError.badResponse }
+        var out: [WxStation] = []
+        for line in text.split(separator: "\n") where !line.hasPrefix("#") {
+            let c = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+            guard c.count > 14, let la = Double(c[1]), let lo = Double(c[2]) else { continue }
+            func v(_ i: Int) -> Double? { c.count > i && c[i] != "MM" ? Double(c[i]) : nil }
+            out.append(WxStation(id: c[0], name: "Buoy \(c[0])", kind: "BUOY", lat: la, lon: lo, tempC: v(14), windDir: v(8), windKt: v(9).map { $0 * 1.944 },
+                                 pressureHpa: v(12), visibilityMi: nil, raw: line.trimmingCharacters(in: .whitespaces), time: nil))
+        }
+        return out
+    }
+
+    func stationHistory(at c: CLLocationCoordinate2D) async throws -> [(Date, Double, Double, Double)] {
+        let url = String(format: "https://api.open-meteo.com/v1/forecast?latitude=%.3f&longitude=%.3f&hourly=temperature_2m,wind_speed_10m,surface_pressure&past_days=1&forecast_days=1&wind_speed_unit=kn&timezone=UTC", c.latitude, c.longitude)
+        let d = try await fetch(url, cache: "wxhist.json")
+        guard let root = try JSONSerialization.jsonObject(with: d) as? [String: Any], let h = root["hourly"] as? [String: Any],
+              let times = h["time"] as? [String], let temps = h["temperature_2m"] as? [Double?], let winds = h["wind_speed_10m"] as? [Double?], let press = h["surface_pressure"] as? [Double?] else { throw FeedError.badResponse }
+        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd'T'HH:mm"; df.timeZone = TimeZone(identifier: "UTC")
+        var out: [(Date, Double, Double, Double)] = []
+        for i in 0..<min(times.count, temps.count, winds.count, press.count) {
+            guard let t = df.date(from: times[i]), let tv = temps[i], let wv = winds[i], let pv = press[i] else { continue }
+            out.append((t, tv, wv, pv))
+        }
+        return out
+    }
+
+    // MARK: NWS alerts + Cal Fire incidents
+
+    func nwsAlerts() async throws -> [HazardAlert] {
+        let d = try await fetch("https://api.weather.gov/alerts/active?status=actual&message_type=alert&limit=500", cache: "nws.json")
+        guard let root = try JSONSerialization.jsonObject(with: d) as? [String: Any], let feats = root["features"] as? [[String: Any]] else { throw FeedError.badResponse }
+        let iso = ISO8601DateFormatter()
+        return feats.compactMap { f in
+            guard let p = f["properties"] as? [String: Any], let id = p["id"] as? String else { return nil }
+            var rings: [[CLLocationCoordinate2D]] = []
+            if let g = f["geometry"] as? [String: Any], let type = g["type"] as? String {
+                if type == "Polygon", let c = g["coordinates"] as? [[[Double]]], let o = c.first { rings = [o.compactMap { $0.count >= 2 ? CLLocationCoordinate2D(latitude: $0[1], longitude: $0[0]) : nil }] }
+                else if type == "MultiPolygon", let c = g["coordinates"] as? [[[[Double]]]] { rings = c.compactMap { $0.first?.compactMap { $0.count >= 2 ? CLLocationCoordinate2D(latitude: $0[1], longitude: $0[0]) : nil } } }
+            }
+            let all = rings.flatMap { $0 }
+            guard !all.isEmpty else { return nil }    // zone-only alerts have no geometry; skip
+            let la = all.map(\.latitude).reduce(0, +) / Double(all.count), lo = all.map(\.longitude).reduce(0, +) / Double(all.count)
+            return HazardAlert(id: id, source: "NWS", event: (p["event"] as? String) ?? "Alert", headline: (p["headline"] as? String) ?? "",
+                               severity: (p["severity"] as? String) ?? "Unknown", area: (p["areaDesc"] as? String) ?? "",
+                               starts: (p["onset"] as? String).flatMap { iso.date(from: $0) }, ends: (p["ends"] as? String).flatMap { iso.date(from: $0) } ?? (p["expires"] as? String).flatMap { iso.date(from: $0) },
+                               lat: la, lon: lo, rings: rings, url: id)
+        }
+    }
+
+    func calFire() async throws -> [HazardAlert] {
+        let d = try await fetch("https://incidents.fire.ca.gov/umbraco/api/IncidentApi/List?inactive=false", cache: "calfire.json")
+        guard let arr = try JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { throw FeedError.badResponse }
+        let iso = ISO8601DateFormatter(); iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return arr.compactMap { i in
+            guard let name = i["Name"] as? String, let la = i["Latitude"] as? Double, let lo = i["Longitude"] as? Double else { return nil }
+            let acres = (i["AcresBurned"] as? Double) ?? 0
+            let cont = (i["PercentContained"] as? Double) ?? 0
+            return HazardAlert(id: "calfire-\(i["UniqueId"] ?? name)", source: "Cal Fire", event: "Wildfire · \(name)",
+                               headline: String(format: "%.0f acres · %.0f%% contained · %@", acres, cont, (i["Location"] as? String) ?? ""),
+                               severity: acres > 10_000 ? "Extreme" : acres > 1_000 ? "Severe" : "Moderate", area: (i["County"] as? String) ?? "California",
+                               starts: (i["Started"] as? String).flatMap { iso.date(from: $0) ?? ISO8601DateFormatter().date(from: $0) }, ends: nil,
+                               lat: la, lon: lo, rings: [], url: i["Url"] as? String)
+        }
+    }
+
+    // MARK: Broadcastify top feeds (HTML, no API key)
+
+    func scannerFeeds() async throws -> [ScannerFeed] {
+        let d = try await fetch("https://www.broadcastify.com/listen/top", cache: "scanner.html")
+        guard let html = String(data: d, encoding: .utf8) else { throw FeedError.badResponse }
+        let re = try NSRegularExpression(pattern: #"/listen/feed/(\d+)"[^>]*>([^<]{3,120})<"#)
+        let listRe = try NSRegularExpression(pattern: #"(\d+)\s*(?:listeners|Listeners)"#)
+        var out: [ScannerFeed] = []
+        var seen = Set<String>()
+        let ns = html as NSString
+        for m in re.matches(in: html, range: NSRange(location: 0, length: ns.length)) {
+            let id = ns.substring(with: m.range(at: 1))
+            var title = ns.substring(with: m.range(at: 2)).trimmingCharacters(in: .whitespacesAndNewlines)
+            title = title.replacingOccurrences(of: "&amp;", with: "&")
+            guard seen.insert(id).inserted, !title.isEmpty else { continue }
+            let tail = ns.substring(with: NSRange(location: m.range.location, length: min(600, ns.length - m.range.location)))
+            var listeners = 0
+            if let lm = listRe.firstMatch(in: tail, range: NSRange(location: 0, length: (tail as NSString).length)) { listeners = Int((tail as NSString).substring(with: lm.range(at: 1))) ?? 0 }
+            let genre = title.lowercased().contains("fire") ? "Fire/EMS" : title.lowercased().contains("police") || title.lowercased().contains("sheriff") ? "Police" : "Public Safety"
+            out.append(ScannerFeed(id: id, title: title, genre: genre, lat: 0, lon: 0, listeners: listeners))
+            if out.count >= 60 { break }
+        }
+        guard !out.isEmpty else { throw FeedError.badResponse }
+        return out
+    }
+
+    // MARK: NOAA SWPC space weather
+
+    func spaceWeather() async -> SpaceWeather {
+        var sw = SpaceWeather()
+        if let d = try? await fetch("https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json", cache: "kp.json"),
+           let arr = try? JSONSerialization.jsonObject(with: d) as? [[Any]], let last = arr.last, last.count > 1 {
+            sw.kp = Double("\(last[1])") ?? 0
+            let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"; df.timeZone = TimeZone(identifier: "UTC")
+            sw.kpTime = df.date(from: "\(last[0])")
+        }
+        if let d = try? await fetch("https://services.swpc.noaa.gov/products/solar-wind/plasma-2-hour.json", cache: "plasma.json"),
+           let arr = try? JSONSerialization.jsonObject(with: d) as? [[Any]], let last = arr.last(where: { $0.count > 2 && "\($0[2])" != "<null>" }) {
+            sw.density = Double("\(last[1])") ?? 0
+            sw.solarWindKmS = Double("\(last[2])") ?? 0
+        }
+        if let d = try? await fetch("https://services.swpc.noaa.gov/json/goes/primary/xrays-6-hour.json", cache: "xray.json"),
+           let arr = try? JSONSerialization.jsonObject(with: d) as? [[String: Any]], let last = arr.last(where: { ($0["energy"] as? String) == "0.1-0.8nm" }) {
+            let flux = (last["flux"] as? Double) ?? 0
+            sw.xrayFlux = flux
+            sw.xrayClass = flux >= 1e-4 ? String(format: "X%.1f", flux / 1e-4) : flux >= 1e-5 ? String(format: "M%.1f", flux / 1e-5) : flux >= 1e-6 ? String(format: "C%.1f", flux / 1e-6) : flux >= 1e-7 ? String(format: "B%.1f", flux / 1e-7) : "A"
+        }
+        if let d = try? await fetch("https://services.swpc.noaa.gov/json/ovation_aurora_latest.json", cache: "aurora.json"),
+           let root = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let coords = root["coordinates"] as? [[Double]] {
+            sw.aurora = coords.compactMap { c in
+                guard c.count >= 3, c[2] >= 15, Int(c[0]) % 4 == 0, Int(c[1]) % 2 == 0 else { return nil }
+                return (lat: c[1], lon: c[0] > 180 ? c[0] - 360 : c[0], prob: c[2])
+            }
+        }
+        sw.fetched = Date()
+        return sw
+    }
+
     func launches() async throws -> [Launch] {
         async let up = optionalFetch("https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=15&format=json", cache: "launches-up.json")
         async let prev = optionalFetch("https://ll.thespacedevs.com/2.2.0/launch/previous/?limit=10&format=json", cache: "launches-prev.json")
@@ -513,6 +917,10 @@ final class AISClient {
     }
 }
 
+
+extension Train {
+    static func heading(from s: String?) -> Double { Camera.headingFrom(s) ?? 0 }
+}
 
 private extension Double {
     func distanceDeg(to c: CLLocationCoordinate2D, lon: Double) -> Double {
