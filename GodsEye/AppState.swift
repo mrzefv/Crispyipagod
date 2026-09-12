@@ -317,7 +317,32 @@ final class AppState: ObservableObject {
 
     private func residentialBoundsContain(_ outer: (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double),
                                           _ inner: (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)) -> Bool {
-        inner.minLat >= outer.minLat && inner.maxLat <= outer.maxLat && inner.minLon >= outer.minLon && inner.maxLon <= outer.maxLon
+        inner.minLat >= outer.minLat
+            && inner.maxLat <= outer.maxLat
+            && residentialLongitudeRangeContains(outerMin: outer.minLon, outerMax: outer.maxLon, innerMin: inner.minLon, innerMax: inner.maxLon)
+    }
+
+    private func residentialLongitudeRangeContains(outerMin: Double, outerMax: Double, innerMin: Double, innerMax: Double) -> Bool {
+        let outerSegments = residentialLongitudeSegments(min: outerMin, max: outerMax)
+        let innerSegments = residentialLongitudeSegments(min: innerMin, max: innerMax)
+        return innerSegments.allSatisfy { inner in
+            outerSegments.contains { outer in inner.0 >= outer.0 && inner.1 <= outer.1 }
+        }
+    }
+
+    private func residentialLongitudeSegments(min: Double, max: Double) -> [(Double, Double)] {
+        if max - min >= 360 { return [(-180, 180)] }
+        let minNorm = normalizedResidentialLongitude(min)
+        let maxNorm = normalizedResidentialLongitude(max)
+        if minNorm <= maxNorm { return [(minNorm, maxNorm)] }
+        return [(minNorm, 180), (-180, maxNorm)]
+    }
+
+    private func normalizedResidentialLongitude(_ lon: Double) -> Double {
+        var value = lon.truncatingRemainder(dividingBy: 360)
+        if value < -180 { value += 360 }
+        if value > 180 { value -= 360 }
+        return value
     }
 
     func neighborCamera(of cam: Camera, forward: Bool) -> Camera? {
