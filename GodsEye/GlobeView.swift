@@ -970,10 +970,20 @@ struct SearchSheet: View {
             req.naturalLanguageQuery = trimmed
             req.resultTypes = [.pointOfInterest, .address]
             req.region = MKCoordinateRegion(center: originCenter, span: MKCoordinateSpan(latitudeDelta: 60, longitudeDelta: 60))
-            async let placeResp = try? MKLocalSearch(request: req).start()
-            async let parcelResp = try? Feeds.shared.parcelRecords(query: trimmed, near: originCenter)
-            let resp = await placeResp
-            let parcel = await parcelResp
+            let resp: MKLocalSearch.Response?
+            let parcel: [ParcelRecord]
+            do {
+                async let placeResp = MKLocalSearch(request: req).start()
+                async let parcelResp = Feeds.shared.parcelRecords(query: trimmed, near: originCenter)
+                resp = try await placeResp
+                parcel = try await parcelResp
+            } catch is CancellationError {
+                await finish()
+                return
+            } catch {
+                resp = nil
+                parcel = []
+            }
             guard !Task.isCancelled else { await finish(); return }
             let shouldApply = await MainActor.run { activeSearchID == searchID }
             guard shouldApply else { await finish(); return }
