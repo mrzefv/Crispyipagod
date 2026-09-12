@@ -503,7 +503,7 @@ final class AppState: ObservableObject {
         guard distance < 8_000 else { return }
         let requestedCenter = center
         let requestedDistance = distance
-        let span = max(0.006, requestedDistance / 550_000)
+        let span = min(0.018, max(0.006, requestedDistance / 550_000))
         do {
             let fetched = try await Feeds.shared.residentialBlueprints(center: requestedCenter, spanDeg: span)
             let fetchSpanMeters = span * 111_000
