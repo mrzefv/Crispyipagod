@@ -40,6 +40,7 @@ final class AppState: ObservableObject {
     @Published var layers: Set<Layer> {
         didSet {
             ud.set(layers.map(\.rawValue), forKey: "layers")
+            if !layers.contains(.residential) { residentialBlueprints = [] }
             rebuildDisplay()
             if layers.contains(.military) && militaryContacts.isEmpty { Task { await refreshMilitary() } }
             if layers.contains(.satellites) && propagators.isEmpty { Task { await refreshSatellites() } }
