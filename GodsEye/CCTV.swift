@@ -70,10 +70,11 @@ final class CamRecorder {
     }
 
     private func scheduleCapture() {
-        captureTask?.cancel()
-        captureTask = Task { [weak self] in
+        guard captureTask == nil else { return }
+        captureTask = Task { @MainActor [weak self] in
             guard let self else { return }
             await self.captureWatched()
+            self.captureTask = nil
         }
     }
 
