@@ -488,8 +488,7 @@ final class Feeds {
             let rightLon = box.right
             let bottomLatBox = bottomLat
             let viewbox = String(format: "%.5f,%.5f,%.5f,%.5f", locale: posix, leftLon, topLatBox, rightLon, bottomLatBox)
-            let encBox = viewbox.addingPercentEncoding(withAllowedCharacters: CharacterSet.urlQueryAllowed.subtracting(CharacterSet(charactersIn: ","))) ?? viewbox
-            let d = try await fetch(base + "&viewbox=\(encBox)&bounded=1", cache: "\(cacheKey)-\(box.name)-\(idx)")
+            let d = try await fetch(base + "&viewbox=\(viewbox)&bounded=1", cache: "\(cacheKey)-\(box.name)-\(idx)")
             guard let arr = try JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { continue }
             for r in parse(arr) where !seen.contains(r.id) {
                 seen.insert(r.id)

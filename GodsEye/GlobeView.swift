@@ -855,7 +855,7 @@ struct SearchSheet: View {
     @State private var parcels: [ParcelRecord] = []
     @State private var searching = false
     @State private var searchTask: Task<Void, Never>?
-    @State private var activeSearchID: UUID?
+    @State private var searchGeneration: Int = 0
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     private var contactMatches: [Contact] {
@@ -951,17 +951,17 @@ struct SearchSheet: View {
     }
 
     private func schedule(_ q: String) {
-        let trimmed = q.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count >= 2 else { places = []; parcels = []; searching = false; activeSearchID = nil; return }
-        let originCenter = s.center
-        let searchID = UUID()
-        activeSearchID = searchID
         searchTask?.cancel()
+        searchGeneration += 1
+        let generation = searchGeneration
+        let trimmed = q.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count >= 2 else { places = []; parcels = []; searching = false; return }
+        let originCenter = s.center
         searching = true
         searchTask = Task {
             func finish() async {
                 await MainActor.run {
-                    if activeSearchID == searchID { searching = false }
+                    if searchGeneration == generation { searching = false }
                 }
             }
             try? await Task.sleep(nanoseconds: 350_000_000)
@@ -985,7 +985,7 @@ struct SearchSheet: View {
                 parcel = []
             }
             guard !Task.isCancelled else { await finish(); return }
-            let shouldApply = await MainActor.run { activeSearchID == searchID }
+            let shouldApply = await MainActor.run { searchGeneration == generation }
             guard shouldApply else { await finish(); return }
             await MainActor.run {
                 places = Array((resp?.mapItems ?? []).prefix(12))
