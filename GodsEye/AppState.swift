@@ -62,6 +62,7 @@ final class AppState: ObservableObject {
     @Published var status = "Initializing…"
     @Published var ready = false
     @Published var toast: String?
+    @Published var pendingSharedView: URL?
 
     // Modes
     @Published var sensor: SensorMode { didSet { ud.set(sensor.rawValue, forKey: "sensor") } }
@@ -296,7 +297,10 @@ final class AppState: ObservableObject {
         startPolling()
         startSatelliteTicker()
         if layers.contains(.ships) { connectAIS() }
-        if let u = pendingDeepLink { pendingDeepLink = nil; open(url: u) }
+        if let u = pendingDeepLink {
+            pendingDeepLink = nil
+            pendingSharedView = u
+        }
     }
 
     func startPolling() {
@@ -785,6 +789,25 @@ final class AppState: ObservableObject {
             parts.append("title=\(s.title.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")")
         }
         return "godseye://view?" + parts.joined(separator: "&")
+    }
+
+    func handleDeepLink(_ url: URL) {
+        guard url.scheme == "godseye" else { return }
+        if ready {
+            pendingSharedView = url
+        } else {
+            pendingDeepLink = url
+        }
+    }
+
+    func dismissPendingSharedView() {
+        pendingSharedView = nil
+    }
+
+    func applyPendingSharedView() {
+        guard let url = pendingSharedView else { return }
+        pendingSharedView = nil
+        open(url: url)
     }
 
     func open(url: URL) {

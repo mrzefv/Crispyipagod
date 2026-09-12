@@ -55,7 +55,7 @@ struct GlobeView: View {
                 .presentationDragIndicator(.visible)
                 .presentationBackground(.ultraThinMaterial)
         }
-        .onOpenURL { url in s.open(url: url) }
+        .onOpenURL { url in s.handleDeepLink(url) }
     }
 
     // MARK: Map
