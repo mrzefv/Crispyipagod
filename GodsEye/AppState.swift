@@ -232,6 +232,8 @@ final class AppState: ObservableObject {
     private var geocodeTask: Task<Void, Never>?
     private var pendingDeepLink: URL?
     private var residentialBlueprintBounds: (minLat: Double, maxLat: Double, minLon: Double, maxLon: Double)?
+    private var residentialRefreshTask: Task<[ResidentialBlueprint], Error>?
+    private var residentialRefreshGeneration = 0
 
     init() {
         let ud = UserDefaults.standard
@@ -270,6 +272,8 @@ final class AppState: ObservableObject {
 
     private func handleResidentialLayerChange() {
         guard layers.contains(.residential) else {
+            residentialRefreshTask?.cancel()
+            residentialRefreshTask = nil
             residentialBlueprints = []
             residentialBlueprintBounds = nil
             residentialBlueprintLoadFailed = false
@@ -572,12 +576,16 @@ final class AppState: ObservableObject {
     }
     func refreshResidentialBlueprints() async {
         guard layers.contains(.residential) else {
+            residentialRefreshTask?.cancel()
+            residentialRefreshTask = nil
             residentialBlueprints = []
             residentialBlueprintBounds = nil
             residentialBlueprintLoadFailed = false
             return
         }
         guard distance < 8_000 else {
+            residentialRefreshTask?.cancel()
+            residentialRefreshTask = nil
             residentialBlueprints = []
             residentialBlueprintBounds = nil
             residentialBlueprintLoadFailed = false
@@ -587,21 +595,33 @@ final class AppState: ObservableObject {
         let requestedDistance = distance
         guard let span = residentialBlueprintSpan(for: requestedDistance) else { return }
         let requestedBounds = residentialFetchBounds(center: requestedCenter, spanDeg: span)
+        residentialRefreshTask?.cancel()
+        residentialRefreshGeneration += 1
+        let generation = residentialRefreshGeneration
         residentialBlueprintLoadFailed = false
+        let task = Task { try await Feeds.shared.residentialBlueprints(center: requestedCenter, spanDeg: span) }
+        residentialRefreshTask = task
         do {
-            let fetched = try await Feeds.shared.residentialBlueprints(center: requestedCenter, spanDeg: span)
+            let fetched = try await task.value
+            guard generation == residentialRefreshGeneration else { return }
             guard layers.contains(.residential) else { return }
             guard let currentBounds = residentialViewportBounds(center: center, distance: distance),
                   residentialBoundsContain(requestedBounds, currentBounds) else {
+                residentialRefreshTask = nil
                 residentialBlueprints = []
                 residentialBlueprintBounds = nil
-                if layers.contains(.residential), distance < 8_000 { Task { await refreshResidentialBlueprints() } }
+                await refreshResidentialBlueprints()
                 return
             }
+            residentialRefreshTask = nil
             residentialBlueprints = fetched
             residentialBlueprintBounds = requestedBounds
             residentialBlueprintLoadFailed = false
+        } catch is CancellationError {
+            if generation == residentialRefreshGeneration { residentialRefreshTask = nil }
         } catch {
+            if generation != residentialRefreshGeneration { return }
+            residentialRefreshTask = nil
             residentialBlueprints = []
             residentialBlueprintBounds = nil
             residentialBlueprintLoadFailed = true
