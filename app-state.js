@@ -104,7 +104,7 @@ export function setActiveTab(state, activeTab) {
   return {
     ...state,
     activeTab,
-    screen: activeTab === "home" ? "home" : state.screen === "timeline" ? "timeline" : "home",
+    screen: activeTab === "home" ? state.screen : "home",
   };
 }
 
@@ -168,12 +168,20 @@ export function togglePlayback(state) {
 
 export function jumpToEvent(state, direction) {
   const sorted = [...timelineEvents].sort((left, right) => left.time - right.time);
-  const currentIndex = sorted.findIndex((event) => event.time >= state.selectedTime);
-  const safeIndex = currentIndex === -1 ? sorted.length - 1 : currentIndex;
-  const nextIndex = Math.min(
-    sorted.length - 1,
-    Math.max(0, safeIndex + direction),
-  );
+  const nextIndex =
+    direction < 0
+      ? Math.max(
+          0,
+          sorted.reduce(
+            (foundIndex, event, index) =>
+              event.time < state.selectedTime ? index : foundIndex,
+            -1,
+          ),
+        )
+      : (() => {
+          const firstLaterIndex = sorted.findIndex((event) => event.time > state.selectedTime);
+          return firstLaterIndex === -1 ? sorted.length - 1 : firstLaterIndex;
+        })();
 
   return {
     ...state,
@@ -185,5 +193,14 @@ export function updateSetting(state, setting, value) {
   return {
     ...state,
     [setting]: value,
+  };
+}
+
+export function cycleMapStyle(state) {
+  const options = ["Globe", "Terrain", "Signal"];
+  const currentIndex = options.indexOf(state.mapStyle);
+  return {
+    ...state,
+    mapStyle: options[(currentIndex + 1) % options.length],
   };
 }

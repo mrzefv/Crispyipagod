@@ -2,13 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  cycleMapStyle,
   closeTimeline,
   createInitialState,
   finishLoading,
   getFilteredLocations,
+  jumpToEvent,
   locations,
   openTimeline,
   selectLocation,
+  setActiveTab,
   setSearchQuery,
   setSelectedTime,
   toggleBookmark,
@@ -66,4 +69,28 @@ test("detail sheet and playback toggles flip boolean state", () => {
 
   assert.equal(expanded.detailExpanded, true);
   assert.equal(playing.isPlaying, true);
+});
+
+test("timeline event jumps choose the closest previous and next markers", () => {
+  const state = setSelectedTime(createInitialState(), 46);
+  assert.equal(jumpToEvent(state, -1).selectedTime, 45);
+  assert.equal(jumpToEvent(state, 1).selectedTime, 70);
+});
+
+test("switching away from home closes the timeline overlay", () => {
+  const timeline = openTimeline(createInitialState());
+  const saved = setActiveTab(timeline, "saved");
+
+  assert.equal(saved.activeTab, "saved");
+  assert.equal(saved.screen, "home");
+});
+
+test("layers control cycles through supported map styles", () => {
+  const first = cycleMapStyle(createInitialState());
+  const second = cycleMapStyle(first);
+  const third = cycleMapStyle(second);
+
+  assert.equal(first.mapStyle, "Terrain");
+  assert.equal(second.mapStyle, "Signal");
+  assert.equal(third.mapStyle, "Globe");
 });

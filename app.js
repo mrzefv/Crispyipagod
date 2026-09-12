@@ -1,4 +1,5 @@
 import {
+  cycleMapStyle,
   closeTimeline,
   createInitialState,
   finishLoading,
@@ -93,7 +94,7 @@ function renderTopBar(selectedLocation) {
           data-role="search"
         />
       </label>
-      <button class="glass-button" data-action="toggle-layers">Layers</button>
+      <button class="glass-button" data-action="toggle-layers">Layers · ${state.mapStyle}</button>
       <button class="glass-button" data-action="open-timeline">Time ${state.selectedTime}</button>
       ${
         state.searchQuery
@@ -127,6 +128,19 @@ function renderBottomPanel(selectedLocation) {
         <button data-action="open-timeline">Timeline</button>
       </div>
     </section>
+  `;
+}
+
+function renderGlobe(selectedLocation, overlayContent = "") {
+  return `
+    <main class="globe-stage" aria-label="Interactive globe view">
+      <div class="globe globe--${state.mapStyle.toLowerCase()}">
+        <div class="globe-core"></div>
+        <div class="globe-grid"></div>
+        ${locations.map(locationButton).join("")}
+      </div>
+      ${overlayContent}
+    </main>
   `;
 }
 
@@ -305,16 +319,26 @@ function renderHome() {
   return `
     <section class="app-shell">
       ${renderTopBar(selectedLocation)}
-      <main class="globe-stage" aria-label="Interactive globe view">
-        <div class="globe">
-          <div class="globe-core"></div>
-          <div class="globe-grid"></div>
-          ${locations.map(locationButton).join("")}
-        </div>
-        ${renderBottomPanel(selectedLocation)}
-        ${renderDetailSheet(selectedLocation)}
-      </main>
+      ${renderGlobe(selectedLocation, `${renderBottomPanel(selectedLocation)}${renderDetailSheet(selectedLocation)}`)}
       ${state.screen === "timeline" ? renderTimeline() : ""}
+      ${renderTabs()}
+    </section>
+  `;
+}
+
+function renderSavedView() {
+  return `
+    <section class="app-shell">
+      ${renderGlobe(getLocationById(state.selectedLocationId), renderSaved())}
+      ${renderTabs()}
+    </section>
+  `;
+}
+
+function renderSettingsView() {
+  return `
+    <section class="app-shell">
+      ${renderGlobe(getLocationById(state.selectedLocationId), renderSettings())}
       ${renderTabs()}
     </section>
   `;
@@ -324,9 +348,9 @@ function render() {
   const current = state.screen === "splash"
     ? renderSplash()
     : state.activeTab === "saved"
-      ? `${renderHome()}${renderSaved()}`
+      ? renderSavedView()
       : state.activeTab === "settings"
-        ? `${renderHome()}${renderSettings()}`
+        ? renderSettingsView()
         : renderHome();
 
   app.innerHTML = current;
@@ -359,6 +383,10 @@ function bindEvents() {
 
   app.querySelectorAll("[data-action='open-timeline']").forEach((element) => {
     element.addEventListener("click", () => setState(openTimeline(state)));
+  });
+
+  app.querySelector("[data-action='toggle-layers']")?.addEventListener("click", () => {
+    setState(cycleMapStyle(state));
   });
 
   app.querySelector("[data-action='close-timeline']")?.addEventListener("click", () => {

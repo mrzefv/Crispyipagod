@@ -186,6 +186,16 @@ select {
     inset -35px -28px 80px rgba(3, 10, 26, 0.8);
 }
 
+.globe--terrain .globe-core {
+  background:
+    radial-gradient(circle at 30% 26%, rgba(172, 255, 182, 0.8), rgba(53, 132, 88, 0.75) 28%, rgba(66, 93, 55, 0.86) 48%, rgba(7, 24, 55, 0.92) 72%, rgba(2, 5, 13, 0.98) 100%);
+}
+
+.globe--signal .globe-core {
+  background:
+    radial-gradient(circle at 25% 30%, rgba(255, 154, 251, 0.86), rgba(123, 69, 255, 0.82) 32%, rgba(16, 30, 75, 0.92) 64%, rgba(2, 5, 13, 0.98) 100%);
+}
+
 .globe-grid {
   border: 1px solid rgba(205, 225, 255, 0.14);
   background:
