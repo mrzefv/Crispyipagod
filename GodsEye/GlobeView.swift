@@ -856,6 +856,7 @@ struct SearchSheet: View {
     @State private var searching = false
     @State private var searchTask: Task<Void, Never>?
     @State private var activeSearchID: UUID?
+    private var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     private var contactMatches: [Contact] {
         let q = query.trimmingCharacters(in: .whitespaces).uppercased()
@@ -914,11 +915,11 @@ struct SearchSheet: View {
                                 sub: item.placemark.title ?? Fmt.coord(item.placemark.coordinate.latitude, item.placemark.coordinate.longitude))
                         }
                     }
-                    if places.isEmpty && !searching && query.count >= 2 {
+                    if places.isEmpty && !searching && trimmedQuery.count >= 2 {
                         Text("No places yet — try an airport, city, or landmark.").font(.footnote).foregroundStyle(.secondary)
                     }
                 }
-                if !parcels.isEmpty || (query.count >= 2 && !searching) {
+                if !parcels.isEmpty || (trimmedQuery.count >= 2 && !searching) {
                     Section("Parcels / owner records") {
                         ForEach(parcels) { p in
                             Button { pickParcel(p) } label: {

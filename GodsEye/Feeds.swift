@@ -427,8 +427,10 @@ final class Feeds {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard q.count >= 2 else { return [] }
         let enc = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
-        let leftLon = max(-180, center.longitude - 1.2)
-        let rightLon = min(180, center.longitude + 1.2)
+        let rawLeftLon = center.longitude - 1.2
+        let rawRightLon = center.longitude + 1.2
+        let leftLon = max(-180, rawLeftLon)
+        let rightLon = min(180, rawRightLon)
         let topLat = min(90, center.latitude + 1.0)
         let bottomLat = max(-90, center.latitude - 1.0)
         let viewbox = String(format: "%.5f,%.5f,%.5f,%.5f", leftLon, topLat, rightLon, bottomLat)
@@ -438,7 +440,9 @@ final class Feeds {
         let latKey = String(format: "%.2f", center.latitude)
         let lonKey = String(format: "%.2f", center.longitude)
         let cacheKey = "parcel-\(String(key.prefix(40)).ifEmpty("search"))-\(latKey)-\(lonKey).json"
-        let url = "https://nominatim.openstreetmap.org/search?q=\(enc)&format=jsonv2&addressdetails=1&extratags=1&limit=\(max(1, min(limit, 30)))&viewbox=\(viewbox)&bounded=1"
+        let hasAntiMeridianWrap = rawLeftLon < -180 || rawRightLon > 180
+        let url = "https://nominatim.openstreetmap.org/search?q=\(enc)&format=jsonv2&addressdetails=1&extratags=1&limit=\(max(1, min(limit, 30)))" +
+            (hasAntiMeridianWrap ? "" : "&viewbox=\(viewbox)&bounded=1")
         let d = try await fetch(url, cache: cacheKey)
         guard let arr = try JSONSerialization.jsonObject(with: d) as? [[String: Any]] else { throw FeedError.badResponse }
         return arr.compactMap { row in
