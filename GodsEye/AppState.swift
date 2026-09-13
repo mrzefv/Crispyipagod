@@ -594,13 +594,16 @@ final class AppState: ObservableObject {
         do { peaks = try await Feeds.shared.peaks(center: center, spanDeg: max(0.1, distance / 111_000)) } catch { feedErrors += 1 }
     }
 
-    private func updateSimulationAnchor(force: Bool = false) {
-        guard layers.contains(.simulation) else { return }
-        let threshold = max(distance * 0.65, 80_000)
+    @discardableResult
+    private func updateSimulationAnchor(force: Bool = false, thresholdScale: Double = 0.65) -> Bool {
+        guard layers.contains(.simulation) else { return false }
+        let threshold = max(distance * thresholdScale, 80_000.0 * min(1.0, thresholdScale / 0.65))
         if force || simulationAnchor == nil || simulationAnchor!.distance(to: center) > threshold {
             simulationAnchor = distance > 1_500_000 ? center : center.moved(meters: min(max(distance * 0.08, 1_800), 10_000), bearing: 38)
             lastSimulationAnchorAt = Date()
+            return true
         }
+        return false
     }
 
     private func startSimulation() {
@@ -612,7 +615,7 @@ final class AppState: ObservableObject {
                 guard let self, !Task.isCancelled else { return }
                 self.simulationTick &+= 1
                 if Date().timeIntervalSince(self.lastSimulationAnchorAt) > 12 {
-                    self.updateSimulationAnchor()
+                    if self.updateSimulationAnchor() { self.simulationTick &+= 1 }
                 }
             }
         }
@@ -1006,7 +1009,7 @@ final class AppState: ObservableObject {
         if layers.contains(.ships), ais.needsResubscribe(for: center) { connectAIS() }
         if userMoved && orbiting { stopOrbit() }
         if userMoved && scenePlaying { stopScene() }
-        if layers.contains(.simulation) { updateSimulationAnchor() }
+        if layers.contains(.simulation), updateSimulationAnchor(thresholdScale: 0.18) { simulationTick &+= 1 }
         let moved = lastRegionFetch.map { $0.center.distance(to: center) > max(distance * 0.5, 5_000) || Date().timeIntervalSince($0.at) > 120 } ?? true
         if moved {
             lastRegionFetch = (center, Date())
@@ -1041,7 +1044,7 @@ final class AppState: ObservableObject {
         if contactCap != prevCap { return true }
         let contactLayers = layers.contains(.flights) || layers.contains(.military)
         let contactViewport = contactLayers && contactCap > 0
-        let viewportLayers = !layers.intersection(Set<Layer>([.ships, .cctv, .fires, .bikeshare, .radio, .cables, .airports, .stations, .alerts, .trains, .simulation])).isEmpty
+        let viewportLayers = !layers.intersection(Set<Layer>([.ships, .cctv, .fires, .bikeshare, .radio, .cables, .airports, .stations, .alerts, .trains])).isEmpty
         guard contactViewport || viewportLayers else { return false }
         guard let last = lastDisplaySample else { return true }
         let moveThreshold = max(distance * (contactViewport ? 0.08 : (show3D ? 0.08 : 0.12)), layers.contains(.cctv) ? 2_500 : (contactViewport ? 8_000 : 12_000))

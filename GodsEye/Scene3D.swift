@@ -138,7 +138,10 @@ struct Scene3DView: View {
             guard isReady else { return }
             bridge.eval("GE.setSpaceMode(\(jsBool(s.layers.contains(.space))))")
         }
-        .onChange(of: s.trackedID) { _, _ in pushEntities(force: true) }
+        .onChange(of: s.trackedID) { _, _ in
+            pushEntities(force: true)
+            pushTrack()
+        }
         .onChange(of: selected) { _, _ in pushEntities(force: true) }
         .onDisappear { pushTimer?.invalidate(); pushTimer = nil; trackTimer?.invalidate(); trackTimer = nil }
     }
@@ -480,7 +483,13 @@ struct Scene3DView: View {
 
     /// 1 Hz: only the tracked target — the page dead-reckons between these at frame rate.
     private func pushTrack() {
-        guard ready, s.isTracking else { return }
+        guard ready else { return }
+        guard s.isTracking else {
+            guard !lastTrackPayload.isEmpty else { return }
+            lastTrackPayload = ""
+            bridge.eval("GE.setTrack({})")
+            return
+        }
         let tr = trackPayload()
         guard !tr.isEmpty, let d = try? JSONSerialization.data(withJSONObject: tr), let js = String(data: d, encoding: .utf8) else { return }
         if js == lastTrackPayload { return }
