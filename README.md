@@ -19,7 +19,7 @@ Target: iOS 17+. Bundle id `party.mrvek.godseye`.
 - **Detail sheet** — half-sheet, expandable to full: title, coords, summary, metadata, Save / Timeline / Share, source link, open in Maps.
 - **Timeline** — −24h → +72h scrubber, play/pause, event markers (M4.5+ quakes, launches), prev/next jump, GO LIVE. Time state persists on the globe.
 - **Saved** — bookmarks, swipe to delete, tap to fly back.
-- **Settings** — accent theme, map style, labels, performance mode, offline mode, cache size/clear, sources, about.
+- **Settings** — accent theme, map style, labels, performance mode with adaptive density, offline mode, cache size/clear, sources, about.
 
 ## v1.1 additions
 
@@ -67,6 +67,7 @@ Target: iOS 17+. Bundle id `party.mrvek.godseye`.
 - **Terrain:** OSM peaks with elevation, point elevation, terrain profile between the two Measure points (Swift Charts).
 - **Scanner:** Broadcastify top feeds (parsed from the public list, geocoded from titles) with one-tap listen, or enter any feed ID. This is the honest replacement for "police chases" — live dispatch audio for the area you're looking at.
 - **Search boost:** Search now includes parcel/address matches with available owner/operator metadata from OpenStreetMap Nominatim, so you can jump directly to property records from the Search sheet.
+- **Paranormal simulation:** optional, clearly fictional on-device layer with looping UFOs, crop-circle rings, déjà vu routes, and abduction flyovers near your current view.
 - New missions: Weather Ops · Grid & Rail · Situational.
 
 ## Feeds (no keys)

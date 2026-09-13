@@ -102,6 +102,8 @@ struct Scene3DView: View {
     private let realismPresets: [(String, String, String)] = [("off", "Flat", "sun.min"), ("day", "Day", "sun.max.fill"), ("golden", "Golden", "sunset.fill"), ("night", "Night", "moon.stars.fill"), ("overcast", "Overcast", "cloud.fill")]
     @State private var shadows = false
     @State private var shadowHour: Double = 14
+    @State private var lastEntityPayload = ""
+    @State private var lastTrackPayload = ""
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -128,12 +130,16 @@ struct Scene3DView: View {
             guard ready else { return }
             bridge.eval("GE.setSpaceMode(\(jsBool(on)))")
         }
+        .onChange(of: s.simulationTick) { _, _ in
+            guard ready, s.layers.contains(.simulation) else { return }
+            pushEntities(force: true)
+        }
         .onChange(of: ready) { _, isReady in
             guard isReady else { return }
             bridge.eval("GE.setSpaceMode(\(jsBool(s.layers.contains(.space))))")
         }
-        .onChange(of: s.trackedID) { _, _ in pushEntities() }
-        .onChange(of: selected) { _, _ in pushEntities() }
+        .onChange(of: s.trackedID) { _, _ in pushEntities(force: true) }
+        .onChange(of: selected) { _, _ in pushEntities(force: true) }
         .onDisappear { pushTimer?.invalidate(); pushTimer = nil; trackTimer?.invalidate(); trackTimer = nil }
     }
 
@@ -277,8 +283,8 @@ struct Scene3DView: View {
             bridge.eval("GE.init({basemap:'\(basemap)', terrain:\(s.sceneTerrain), buildings:\(s.sceneBuildings), assets:\(assets), sensor:'\(sensor)', hud:\(s.hud), accent:'\(accent)', googleKey:'\(gkey)', realism:'\(realism)', space:\(jsBool(s.layers.contains(.space)))})")
             let h = max(s.distance, 300)
             bridge.eval(String(format: "GE.setView(%.6f,%.6f,%.1f,%.2f,%.2f)", s.center.latitude, s.center.longitude, h, s.heading, s.pitch))
-            pushEntities()
-            pushTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in pushEntities() }
+            pushEntities(force: true)
+            pushTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in pushEntities() }
             trackTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in pushTrack() }
             bridge.eval("GE.setFollow(\(follow))")
             Task { await reloadCatalog() }
@@ -339,6 +345,7 @@ struct Scene3DView: View {
         else if let ap = s.visibleAirports.first(where: { "apt-\($0.id)" == id }) { selected = Entity.from(ap) }
         else if let n = s.infra.first(where: { "infra-\($0.id)" == id }) { selected = Entity.from(n) }
         else if let st = s.storms.first(where: { "storm-\($0.id)" == id }) { selected = Entity.from(st) }
+        else if let sim = s.simulationContacts.first(where: { "sim-\($0.id)" == id }) { selected = Entity.from(sim) }
     }
 
     private func trackEntity(_ id: String) {
@@ -346,18 +353,18 @@ struct Scene3DView: View {
         else if let v = s.ships.values.first(where: { "sh-\($0.id)" == id }) { s.track(Entity.from(v)) }
     }
 
-    private func pushEntities() {
+    private func pushEntities(force: Bool = false) {
         guard ready else { return }
         var items: [[String: Any]] = []
         if s.sceneEntities {
             let acs = dense ? (s.contacts + s.militaryContacts) : s.visibleContacts
-            for c in acs.prefix(dense ? 6000 : 500) {
+            for c in acs.prefix(dense ? 3000 : 500) {
                 items.append(["id": "ac-\(c.id)", "kind": "ac", "lat": c.lat, "lon": c.lon, "alt": Double(c.altFt ?? 0) * 0.3048,
                               "label": c.displayName, "heading": c.track, "mil": c.military, "spd": c.groundSpeedKt ?? 0, "model": aircraftModel(c),
                               "sub": [c.type ?? "", c.registration ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")])
             }
             let shs = dense ? Array(s.ships.values) : s.visibleShips
-            for v in shs.prefix(dense ? 3000 : 400) {
+            for v in shs.prefix(dense ? 1600 : 320) {
                 items.append(["id": "sh-\(v.id)", "kind": "sh", "lat": v.lat, "lon": v.lon, "alt": 0, "label": v.displayName, "heading": v.cog, "mil": false, "spd": v.sogKt, "sub": "MMSI \(v.id)", "model": shipModel(v)])
             }
             for q in s.visibleQuakes.prefix(400) {
@@ -388,6 +395,11 @@ struct Scene3DView: View {
                               "img": cam.imageURL, "sub": "\(cam.source)\(cam.isLiveVideo ? " · LIVE" : "")", "watch": s.cctv.watching.contains(cam.id), "model": "camera"])
             }
         }
+        if s.layers.contains(.simulation) {
+            for sim in s.simulationContacts {
+                items.append(["id": "sim-\(sim.id)", "kind": "sim", "lat": sim.lat, "lon": sim.lon, "alt": sim.altM, "label": sim.title, "heading": sim.heading, "mil": false, "sub": sim.subtitle, "icon": sim.kind.icon])
+            }
+        }
         var polys: [[String: Any]] = []
         if s.sceneLines {
             for p in s.propertyLines {
@@ -406,13 +418,22 @@ struct Scene3DView: View {
                 }
             }
         }
+        if s.layers.contains(.simulation) {
+            for sim in s.simulationOverlays {
+                for (i, ring) in sim.rings.enumerated() {
+                    polys.append(["id": "\(sim.id)-\(i)", "kind": "sim", "target": false, "coords": ring.flatMap { [$0.longitude, $0.latitude] }])
+                }
+            }
+        }
         var sel: [String: Any] = [:]
         if let e = selected { sel = ["lat": e.lat, "lon": e.lon, "title": e.title, "kind": e.kind.rawValue] }
         let track = trackPayload()
         let payload: [String: Any] = ["entities": items, "polys": polys, "selected": sel, "track": track,
                                       "counts": ["ac": s.contacts.count + s.militaryContacts.count, "sh": s.ships.count, "sat": s.satellites.count, "cam": s.cameras.count],
-                                      "orb": s.satellites.count, "pass": Int(Date().timeIntervalSince1970 / 90) % 10000]
+                                      "orb": s.satellites.count, "pass": Int((s.lastUpdate?.timeIntervalSince1970 ?? 0) / 15) % 10000]
         guard let d = try? JSONSerialization.data(withJSONObject: payload), let js = String(data: d, encoding: .utf8) else { return }
+        if !force, js == lastEntityPayload { return }
+        lastEntityPayload = js
         bridge.eval("GE.setData(\(js))")
     }
 
@@ -461,6 +482,8 @@ struct Scene3DView: View {
         guard ready, s.isTracking else { return }
         let tr = trackPayload()
         guard !tr.isEmpty, let d = try? JSONSerialization.data(withJSONObject: tr), let js = String(data: d, encoding: .utf8) else { return }
+        if js == lastTrackPayload { return }
+        lastTrackPayload = js
         bridge.eval("GE.setTrack(\(js))")
     }
 
@@ -789,6 +812,8 @@ window.GE = (() => {
 
   function esri(layer){ return new Cesium.UrlTemplateImageryProvider({ url: 'https://server.arcgisonline.com/ArcGIS/rest/services/'+layer+'/MapServer/tile/{z}/{y}/{x}', maximumLevel: 19, credit: 'Esri, Maxar, Earthstar Geographics' }); }
   function osm(){ return new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/', credit: '© OpenStreetMap contributors' }); }
+  function wantsAnimatedShader(){ return !!(SHADERS[sensor] && sensor !== 'flir'); }
+  function syncRenderMode(){ if (!viewer) return; viewer.scene.requestRenderMode = !(trk || cockpit || wantsAnimatedShader()); viewer.scene.requestRender(); }
 
   // ---- basemaps ----
   async function setBasemap(name){
@@ -927,7 +952,7 @@ window.GE = (() => {
     applyBuildingStyle();
     seedSpaceFX();
     viewer.clock.shouldAnimate = false;
-    sc.requestRenderMode = !on && !(SHADERS[sensor] && sensor !== 'flir') && !trk;
+    syncRenderMode();
     status('REALISM ' + realism.toUpperCase());
     sc.requestRender();
   }
@@ -991,8 +1016,7 @@ window.GE = (() => {
       stage = new Cesium.PostProcessStage({ fragmentShader: SHADERS[sensor], uniforms: { t: () => (Date.now()-t0)/1000 } });
       viewer.scene.postProcessStages.add(stage);
     }
-    viewer.scene.requestRenderMode = !SHADERS[sensor] || sensor === 'flir';   // animated shaders need continuous render
-    viewer.scene.requestRender();
+    syncRenderMode();
   }
   function setHUD(on){ hudOn = !!on; $('hud').classList.toggle('off', !hudOn); }
   function status(t){ $('stat').textContent = t; post({type:'status', text: t}); }
@@ -1163,8 +1187,7 @@ window.GE = (() => {
     if (tileset) tileset.shadows = on ? Cesium.ShadowMode.ENABLED : Cesium.ShadowMode.DISABLED;
     for (const t of customTs.values()) t.shadows = on ? Cesium.ShadowMode.ENABLED : Cesium.ShadowMode.DISABLED;
     if (on) { const d = new Date(); d.setUTCHours(Math.floor(hourZ||12), Math.round(((hourZ||12)%1)*60), 0, 0); viewer.clock.currentTime = Cesium.JulianDate.fromDate(d); viewer.clock.shouldAnimate = false; }
-    viewer.scene.requestRenderMode = !on && !(SHADERS[sensor] && sensor !== 'flir');
-    viewer.scene.requestRender();
+    syncRenderMode();
   }
 
   // ---- live track: dead-reckon at frame rate, optional camera follow ----
@@ -1172,11 +1195,11 @@ window.GE = (() => {
   function setFollow(on){ follow = !!on; followHPR = null; if (!follow && viewer) viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY); status(follow ? 'FOLLOW ON · DRAG TO ORBIT TARGET' : 'FOLLOW OFF'); }
   function setTrack(t){
     if (!viewer) return;
-    if (!t || !t.id) { trk = null; if (lastData) lastData.track = {}; viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY); viewer.scene.requestRenderMode = !(SHADERS[sensor] && sensor !== 'flir'); return; }
+    if (!t || !t.id) { trk = null; if (lastData) lastData.track = {}; viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY); syncRenderMode(); return; }
     if (!trk || trk.id !== t.id) { followHPR = null; }
     trk = Object.assign({}, t, { t0: performance.now(), lat0: t.lat, lon0: t.lon });
     if (lastData) lastData.track = t;
-    viewer.scene.requestRenderMode = false;   // continuous render while tracking
+    syncRenderMode();
   }
   function trkPos(){
     if (!trk) return null;
@@ -1227,6 +1250,7 @@ window.GE = (() => {
     $('cross').style.display = cockpit ? 'none' : '';
     viewer.scene.screenSpaceCameraController.enableInputs = !cockpit;
     if (cockpit) cockpitTick(); else { viewer.trackedEntity = undefined; viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY); followHPR = null; }
+    syncRenderMode();
     post({type:'cockpit', on: cockpit});
   }
   function cockpitTick(){
@@ -1292,8 +1316,8 @@ window.GE = (() => {
   }
 
   // ---- data ----
-  const colors = { ac:'#4de3ff', mil:'#ffa63d', sh:'#5aa9ff', cam:'#c77dff', eq:'#ff6a3d', fire:'#ff3b30', sat:'#9ad7ff', train:'#ffd166', apt:'#8ecae6', infra:'#2ec4b6', storm:'#c77dff' };
-  const icons = { ac:'✈', sh:'⛴', cam:'▣', eq:'◎', fire:'▲', sat:'✦', train:'▬', apt:'⊕', infra:'▦', storm:'≋' };
+  const colors = { ac:'#4de3ff', mil:'#ffa63d', sh:'#5aa9ff', cam:'#c77dff', eq:'#ff6a3d', fire:'#ff3b30', sat:'#9ad7ff', train:'#ffd166', apt:'#8ecae6', infra:'#2ec4b6', storm:'#c77dff', sim:'#9dffb2' };
+  const icons = { ac:'✈', sh:'⛴', cam:'▣', eq:'◎', fire:'▲', sat:'✦', train:'▬', apt:'⊕', infra:'▦', storm:'≋', sim:'🛸' };
   function setData(d){
     if (!viewer) return;
     lastData = d;
@@ -1308,7 +1332,7 @@ window.GE = (() => {
       const cc = Cesium.Color.fromCssColorString(col);
       let ent = viewer.entities.getById(id);
       const isCam = e.kind === 'cam';
-      const img = boxed ? (isCam && camH < 8000 ? (camImgs.get(e.id) || sprite(e.label, e.sub, col, { icon: '▣' })) : sprite(e.label, e.sub, col, { icon: icons[e.kind] || '▣' })) : null;
+      const img = boxed ? (isCam && camH < 8000 ? (camImgs.get(e.id) || sprite(e.label, e.sub, col, { icon: '▣' })) : sprite(e.label, e.sub, col, { icon: e.icon || icons[e.kind] || '▣' })) : null;
       if (isCam && camH < 8000 && !camImgs.has(e.id)) { camImgs.set(e.id, null); camCard(e.img, e.label).then(cv => { camImgs.set(e.id, cv); const en = viewer.entities.getById(id); if (en && en.billboard) { en.billboard.image = cv; viewer.scene.requestRender(); } }); }
       const mUri = modelUri(e);
       const useModel = boxed && !!mUri && (camH < 30000 && (e.kind === 'ac' || e.kind === 'sh') || camH < 8000 && ['train','cam','infra'].includes(e.kind) || e.kind === 'sat' && camH > 200000);
@@ -1326,10 +1350,10 @@ window.GE = (() => {
       const id = 'p:' + p.id + ':' + p.coords.length; keep.add(id);
       if (viewer.entities.getById(id)) continue;
       const arr = Cesium.Cartesian3.fromDegreesArray(p.coords);
-      const col = p.kind === 'fp' ? Cesium.Color.CYAN : p.kind === 'region' ? Cesium.Color.WHITE : p.kind === 'hazard' ? Cesium.Color.fromCssColorString('#ff6a3d') : Cesium.Color.YELLOW;
+      const col = p.kind === 'fp' ? Cesium.Color.CYAN : p.kind === 'region' ? Cesium.Color.WHITE : p.kind === 'hazard' ? Cesium.Color.fromCssColorString('#ff6a3d') : p.kind === 'sim' ? Cesium.Color.fromCssColorString('#9dffb2') : Cesium.Color.YELLOW;
       viewer.entities.add({ id,
-        polygon: p.kind === 'region' ? undefined : { hierarchy: new Cesium.PolygonHierarchy(arr), material: col.withAlpha(p.kind==='fp' ? 0.10 : p.kind==='hazard' ? 0.15 : (p.target ? 0.18 : 0.04)), classificationType: Cesium.ClassificationType.BOTH },
-        polyline: { positions: arr.concat([arr[0]]), width: p.kind==='fp' ? 1.5 : (p.target ? 3 : (p.kind==='region' ? 2 : 1)), material: col.withAlpha(p.kind==='region' ? 0.9 : (p.target ? 1 : 0.6)), clampToGround: true } });
+        polygon: p.kind === 'region' ? undefined : { hierarchy: new Cesium.PolygonHierarchy(arr), material: col.withAlpha(p.kind==='fp' ? 0.10 : p.kind==='hazard' ? 0.15 : p.kind==='sim' ? 0.10 : (p.target ? 0.18 : 0.04)), classificationType: Cesium.ClassificationType.BOTH },
+        polyline: { positions: arr.concat([arr[0]]), width: p.kind==='fp' ? 1.5 : p.kind==='sim' ? 1.8 : (p.target ? 3 : (p.kind==='region' ? 2 : 1)), material: col.withAlpha(p.kind==='region' ? 0.9 : (p.target ? 1 : 0.6)), clampToGround: true } });
     }
     if (d.selected && d.selected.lat !== undefined) {
       keep.add('sel');
