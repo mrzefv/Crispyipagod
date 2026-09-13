@@ -388,7 +388,8 @@ struct Scene3DView: View {
         var items: [[String: Any]] = []
         if s.sceneEntities {
             let baseContacts = s.visibleContacts
-            let extraMilitary = dense ? Array(s.militaryContacts.filter { c in !baseContacts.contains(where: { $0.id == c.id }) }.prefix(120)) : []
+            let baseContactIDs = Set(baseContacts.map(\.id))
+            let extraMilitary = dense ? Array(s.militaryContacts.filter { !baseContactIDs.contains($0.id) }.prefix(120)) : []
             let acs = baseContacts + extraMilitary
             for c in acs.prefix(dense ? 500 : 320) {
                 items.append(["id": "ac-\(c.id)", "kind": "ac", "lat": c.lat, "lon": c.lon, "alt": Double(c.altFt ?? 0) * 0.3048,

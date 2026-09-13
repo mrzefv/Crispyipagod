@@ -1061,12 +1061,16 @@ final class AppState: ObservableObject {
         if contactCap != prevCap { return true }
         let contactLayers = layers.contains(.flights) || layers.contains(.military)
         let contactViewport = contactLayers && contactCap > 0
-        let viewportLayers = !layers.intersection(Set<Layer>([.ships, .satellites, .cctv, .fires, .bikeshare, .radio, .cables, .airports, .stations, .alerts, .trains, .peaks, .simulation])).isEmpty
+        let viewportLayers = !layers.intersection(cameraRebuildLayers).isEmpty
         guard contactViewport || viewportLayers else { return false }
         guard let last = lastDisplaySample else { return true }
         let moveThreshold = max(distance * (contactViewport ? 0.08 : (show3D ? 0.08 : 0.12)), layers.contains(.cctv) ? 2_500 : (contactViewport ? 8_000 : 12_000))
         let zoomThreshold = max(distance * 0.16, 20_000)
         return last.center.distance(to: center) > moveThreshold || abs(last.distance - distance) > zoomThreshold
+    }
+
+    private var cameraRebuildLayers: Set<Layer> {
+        [.ships, .satellites, .cctv, .fires, .bikeshare, .radio, .cables, .airports, .stations, .alerts, .trains, .peaks, .simulation]
     }
 
     func reverseGeocode(_ c: CLLocationCoordinate2D) async -> (title: String, detail: String, extraMeta: [MetaRow]) {
