@@ -621,6 +621,8 @@ final class AppState: ObservableObject {
     private func stopSimulation() {
         simulationTask?.cancel()
         simulationTask = nil
+        simulationAnchor = nil
+        simulationTick = 0
     }
 
     func listen(_ f: ScannerFeed) {
@@ -1038,10 +1040,11 @@ final class AppState: ObservableObject {
     private func shouldRebuildDisplayOnCameraChange(prevCap: Int) -> Bool {
         if contactCap != prevCap { return true }
         let contactLayers = layers.contains(.flights) || layers.contains(.military)
+        let contactViewport = contactLayers && contactCap > 0
         let viewportLayers = !layers.intersection(Set<Layer>([.ships, .cctv, .fires, .bikeshare, .radio, .cables, .airports, .stations, .alerts, .trains, .simulation])).isEmpty
-        guard contactLayers || viewportLayers || contactCap > 0 else { return false }
+        guard contactViewport || viewportLayers else { return false }
         guard let last = lastDisplaySample else { return true }
-        let moveThreshold = max(distance * (contactLayers ? 0.08 : (show3D ? 0.08 : 0.12)), layers.contains(.cctv) ? 2_500 : (contactLayers ? 8_000 : 12_000))
+        let moveThreshold = max(distance * (contactViewport ? 0.08 : (show3D ? 0.08 : 0.12)), layers.contains(.cctv) ? 2_500 : (contactViewport ? 8_000 : 12_000))
         let zoomThreshold = max(distance * 0.16, 20_000)
         return last.center.distance(to: center) > moveThreshold || abs(last.distance - distance) > zoomThreshold
     }
