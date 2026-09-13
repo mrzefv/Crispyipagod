@@ -1025,6 +1025,7 @@ final class AppState: ObservableObject {
         if layers.contains(.simulation), updateSimulationAnchor(thresholdScale: 0.18) {
             simulationRevision &+= 1
             refreshSelectedSimulation()
+            lastDisplaySample = (center, distance)
         }
         let moved = lastRegionFetch.map { $0.center.distance(to: center) > max(distance * 0.5, 5_000) || Date().timeIntervalSince($0.at) > 120 } ?? true
         if moved {
