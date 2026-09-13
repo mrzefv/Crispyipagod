@@ -178,8 +178,8 @@ struct SettingsView: View {
                         .onChange(of: s.performanceMode) { _, _ in s.startPolling() }
                 } header: { Text("Performance") } footer: {
                     Text(s.performanceMode
-                         ? "Flat terrain · up to 250 aircraft / 200 ships when zoomed in · 30s polling · 5s orbit ticks. Recommended on iPhone XS-era devices."
-                         : "3D terrain · up to 600 aircraft / 400 ships · 15s polling · 3s orbit ticks. Heavier on older devices.")
+                         ? "Flat terrain with adaptive density caps · 30s polling · 5s satellite ticks. Recommended on older devices."
+                         : "3D terrain with the same adaptive density caps · 20s polling · 4s satellite ticks to reduce spikes while keeping higher visual quality.")
                 }
 
                 Section {

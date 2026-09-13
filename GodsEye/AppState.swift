@@ -63,6 +63,7 @@ final class AppState: ObservableObject {
             if layers.contains(.space) { Task { await refreshSpace() } }
             if layers.contains(.scanner) && scanners.isEmpty { Task { await refreshScanners() } }
             if layers.contains(.peaks) { Task { await refreshPeaks() } }
+            if layers.contains(.simulation) { startSimulation() } else { stopSimulation() }
         }
     }
     @Published var contacts: [Contact] = [] { didSet { rebuildDisplay(); trackTick(fromPoll: true) } }
@@ -100,6 +101,8 @@ final class AppState: ObservableObject {
     @Published var auroraPoints: [AuroraPoint] = []
     @Published var night: [CLLocationCoordinate2D] = []
     @Published var storms: [StormCell] = []
+    @Published var simulationTick = 0
+    @Published var simulationRevision = 0
     @Published var showRadar = false
     @Published var showStation: WxStation?
     @Published var showProfile = false
@@ -245,8 +248,13 @@ final class AppState: ObservableObject {
     private let ud = UserDefaults.standard
     private var pollTask: Task<Void, Never>?
     private var satTask: Task<Void, Never>?
+    private var simulationTask: Task<Void, Never>?
     private var playTask: Task<Void, Never>?
     private var lastContactFetchCenter: CLLocationCoordinate2D?
+    private var lastDisplaySample: (center: CLLocationCoordinate2D, distance: Double)?
+    private var simulationAnchor: CLLocationCoordinate2D?
+    private var lastSimulationAnchorAt = Date.distantPast
+    private var lastTrackTrailID: String?
     private var geocoder = CLGeocoder()
     private var geocodeTask: Task<Void, Never>?
     private var pendingDeepLink: URL?
@@ -371,17 +379,29 @@ final class AppState: ObservableObject {
         }
     }
 
-    var pollInterval: UInt64 { performanceMode ? 30 : 15 }
+    var pollInterval: UInt64 { performanceMode ? 30 : 20 }
     var isLive: Bool { timeCursor == nil }
     var effectiveTime: Date { timeCursor ?? Date() }
     var isTracking: Bool { trackedID != nil }
 
+    private var densityScale: Double {
+        let widthScale = min(1.18, max(0.85, viewWidth / 390))
+        let scenePenalty = show3D ? 0.82 : 1.0
+        let visualPenalty = performanceMode ? 1.0 : 0.9
+        let trackingBoost = isTracking ? 1.08 : 1.0
+        return widthScale * scenePenalty * visualPenalty * trackingBoost
+    }
+
+    private func scaledCap(base: Int, min minCap: Int) -> Int {
+        max(minCap, Int((Double(base) * densityScale).rounded()))
+    }
+
     var contactCap: Int {
         let d = distance
         if d > 7_000_000 { return isTracking ? 40 : 0 }
-        if d > 2_500_000 { return performanceMode ? 60 : 120 }
-        if d > 800_000 { return performanceMode ? 150 : 300 }
-        return performanceMode ? 250 : 600
+        if d > 2_500_000 { return scaledCap(base: 80, min: 50) }
+        if d > 800_000 { return scaledCap(base: 170, min: 110) }
+        return scaledCap(base: 280, min: 180)
     }
 
     func rebuildDisplay() {
@@ -418,7 +438,7 @@ final class AppState: ObservableObject {
         var sh: [Ship] = []
         if layers.contains(.ships), distance < 5_000_000 {
             let cutoff = Date().addingTimeInterval(-20 * 60)
-            let shipCap = performanceMode ? 200 : 400
+            let shipCap = scaledCap(base: distance < 800_000 ? 220 : 150, min: 90)
             sh = Array(ships.values.filter { $0.seenAt > cutoff }
                 .map { ($0, $0.coord.distance(to: cen)) }
                 .sorted { $0.1 < $1.1 }
@@ -429,7 +449,7 @@ final class AppState: ObservableObject {
 
         var cams: [Camera] = []
         if layers.contains(.cctv), distance < 400_000 {
-            let camCap = distance < 15_000 ? 400 : 120
+            let camCap = scaledCap(base: distance < 15_000 ? 280 : 110, min: distance < 15_000 ? 140 : 70)
             cams = Array(cameras.filter { $0.available }
                 .map { ($0, $0.coord.distance(to: cen)) }
                 .filter { $0.1 < 60_000 }
@@ -441,21 +461,21 @@ final class AppState: ObservableObject {
 
         var fr: [Fire] = []
         if layers.contains(.fires) {
-            let cap = distance > 3_000_000 ? 300 : (performanceMode ? 500 : 900)
+            let cap = distance > 3_000_000 ? scaledCap(base: 260, min: 140) : scaledCap(base: 520, min: 260)
             fr = Array(fires.prefix(cap))
         }
         if fr != visibleFires { visibleFires = fr }
 
         var bk: [BikeStation] = []
         if layers.contains(.bikeshare), distance < 60_000 {
-            bk = Array(bikes.map { ($0, $0.coord.distance(to: cen)) }.sorted { $0.1 < $1.1 }.prefix(250).map(\.0))
+            bk = Array(bikes.map { ($0, $0.coord.distance(to: cen)) }.sorted { $0.1 < $1.1 }.prefix(scaledCap(base: 220, min: 120)).map(\.0))
         }
         if bk != visibleBikes { visibleBikes = bk }
 
         var rd: [RadioStation] = []
         if layers.contains(.radio) {
-            rd = distance > 6_000_000 ? Array(radioStations.prefix(300))
-               : Array(radioStations.map { ($0, $0.coord.distance(to: cen)) }.sorted { $0.1 < $1.1 }.prefix(200).map(\.0))
+            rd = distance > 6_000_000 ? Array(radioStations.prefix(scaledCap(base: 260, min: 140)))
+               : Array(radioStations.map { ($0, $0.coord.distance(to: cen)) }.sorted { $0.1 < $1.1 }.prefix(scaledCap(base: 180, min: 100)).map(\.0))
         }
         if rd != visibleRadio { visibleRadio = rd }
 
@@ -463,20 +483,20 @@ final class AppState: ObservableObject {
         if layers.contains(.cables), distance < 9_000_000 {
             let s = min(80.0, max(1.0, distance / 111_000))
             cb = cables.filter { $0.maxLat >= cen.latitude - s && $0.minLat <= cen.latitude + s && $0.maxLon >= cen.longitude - s * 1.5 && $0.minLon <= cen.longitude + s * 1.5 }
-            cb = Array(cb.prefix(performanceMode ? 60 : 140))
+            cb = Array(cb.prefix(scaledCap(base: 90, min: 45)))
         }
         if cb != visibleCables { visibleCables = cb }
 
         var ap: [Airport] = []
         if layers.contains(.airports) {
             ap = distance > 4_000_000 ? airports.filter { $0.type == "large_airport" }
-               : Array(airports.map { ($0, $0.coord.distance(to: cen)) }.filter { $0.1 < distance * 2.5 }.sorted { $0.1 < $1.1 }.prefix(performanceMode ? 150 : 300).map(\.0))
+               : Array(airports.map { ($0, $0.coord.distance(to: cen)) }.filter { $0.1 < distance * 2.5 }.sorted { $0.1 < $1.1 }.prefix(scaledCap(base: 180, min: 90)).map(\.0))
         }
         if ap != visibleAirports { visibleAirports = ap }
 
         var ws: [WxStation] = []
         if layers.contains(.stations), distance < 5_000_000 {
-            ws = Array(stations.map { ($0, $0.coord.distance(to: cen)) }.sorted { $0.1 < $1.1 }.prefix(performanceMode ? 150 : 300).map(\.0))
+            ws = Array(stations.map { ($0, $0.coord.distance(to: cen)) }.sorted { $0.1 < $1.1 }.prefix(scaledCap(base: 180, min: 90)).map(\.0))
         }
         if ws != visibleStations { visibleStations = ws }
 
@@ -489,9 +509,10 @@ final class AppState: ObservableObject {
 
         var tr: [Train] = []
         if layers.contains(.trains) {
-            tr = distance > 6_000_000 ? trains : Array(trains.map { ($0, $0.coord.distance(to: cen)) }.sorted { $0.1 < $1.1 }.prefix(300).map(\.0))
+            tr = distance > 6_000_000 ? Array(trains.prefix(scaledCap(base: 220, min: 120))) : Array(trains.map { ($0, $0.coord.distance(to: cen)) }.sorted { $0.1 < $1.1 }.prefix(scaledCap(base: 220, min: 120)).map(\.0))
         }
         if tr != visibleTrains { visibleTrains = tr }
+        lastDisplaySample = (center, distance)
     }
 
     func rebuildRadar() {
@@ -575,6 +596,57 @@ final class AppState: ObservableObject {
         do { peaks = try await Feeds.shared.peaks(center: center, spanDeg: max(0.1, distance / 111_000)) } catch { feedErrors += 1 }
     }
 
+    @discardableResult
+    private func updateSimulationAnchor(force: Bool = false, thresholdScale: Double = 0.65) -> Bool {
+        guard layers.contains(.simulation) else { return false }
+        let threshold = max(distance * thresholdScale, 80_000.0 * min(1.0, thresholdScale / 0.65))
+        if force || simulationAnchor == nil || simulationAnchor!.distance(to: center) > threshold {
+            simulationAnchor = distance > 1_500_000 ? center : center.moved(meters: min(max(distance * 0.08, 1_800), 10_000), bearing: 38)
+            lastSimulationAnchorAt = Date()
+            return true
+        }
+        return false
+    }
+
+    private func startSimulation() {
+        updateSimulationAnchor(force: simulationAnchor == nil)
+        guard simulationTask == nil else { return }
+        simulationTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard let self, !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.simulationTick &+= 1
+                    self.trackTick(fromPoll: false)
+                    if Date().timeIntervalSince(self.lastSimulationAnchorAt) > 12 {
+                        if self.updateSimulationAnchor() {
+                            self.simulationRevision &+= 1
+                            self.refreshSelectedSimulation()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func stopSimulation() {
+        simulationTask?.cancel()
+        simulationTask = nil
+        if trackedID?.hasPrefix("sim-") == true || trackedEntity?.kind == .simulation { stopTracking(silent: true) }
+        if selected?.kind == .simulation { selected = nil }
+        simulationAnchor = nil
+        simulationTick = 0
+        simulationRevision &+= 1
+        rebuildDisplay()
+    }
+
+    private func refreshSelectedSimulation() {
+        guard let id = selected?.id, id.hasPrefix("sim-") else { return }
+        if let sim = simulationContacts.first(where: { "sim-\($0.id)" == id }) {
+            selected = Entity.from(sim)
+        }
+    }
+
     func listen(_ f: ScannerFeed) {
         scannerNow = f
         scannerPlayer.play(RadioStation(stationuuid: f.id, name: f.title, url_resolved: f.streamURL, country: f.genre, geo_lat: f.lat, geo_long: f.lon, tags: nil, codec: "mp3", clickcount: f.listeners))
@@ -614,8 +686,60 @@ final class AppState: ObservableObject {
     var visibleLaunches: [Launch] { layers.contains(.launches) ? launches : [] }
     var visibleSatellites: [Satellite] {
         guard layers.contains(.satellites) else { return [] }
-        if distance > 3_000_000 || !performanceMode { return satellites }
-        return satellites.filter { $0.coord.distance(to: center) < 4_000_000 }
+        let cap = scaledCap(base: distance > 3_000_000 ? 160 : 240, min: 70)
+        let ranked = distance > 3_000_000
+            ? Array(satellites.prefix(cap))
+            : Array(satellites.map { ($0, $0.coord.distance(to: center)) }.sorted { $0.1 < $1.1 }.prefix(cap).map(\.0))
+        if let tid = trackedID, tid.hasPrefix("sat-"), let tracked = satellites.first(where: { "sat-\($0.id)" == tid }), !ranked.contains(where: { $0.id == tracked.id }) {
+            return ranked + [tracked]
+        }
+        return ranked
+    }
+
+    private func simulationOrbit(around c: CLLocationCoordinate2D, radius: Double, bearing: Double, step: Double = 12, secondsPerStep: Double = 2) -> (coord: CLLocationCoordinate2D, heading: Double, speedKt: Double) {
+        let coord = c.moved(meters: radius, bearing: bearing)
+        let next = c.moved(meters: radius, bearing: bearing + step)
+        return (coord, Geo.bearing(from: coord, to: next), coord.distance(to: next) / max(secondsPerStep, 0.5) / 0.514444)
+    }
+
+    private func circleRing(center: CLLocationCoordinate2D, radius: Double, points: Int = 36) -> [CLLocationCoordinate2D] {
+        (0...points).map { i in center.moved(meters: radius, bearing: Double(i) * 360 / Double(points)) }
+    }
+
+    var simulationContacts: [SimulationContact] {
+        guard layers.contains(.simulation), let anchor = simulationAnchor else { return [] }
+        let phase = simulationTick
+        let orbit = min(max(distance * 0.07, 1_800), 12_000)
+        let cropCenter = anchor.moved(meters: orbit * 0.52, bearing: 210)
+        let cropBearing = Double(phase) * 32
+        let cropUFO = simulationOrbit(around: cropCenter, radius: orbit * 0.34, bearing: cropBearing)
+        let dejaBearing = 30 + sin(Double(phase) * 0.55) * 130
+        let deja = simulationOrbit(around: anchor, radius: orbit * 0.82, bearing: dejaBearing)
+        let beamBase = anchor.moved(meters: orbit * 0.3, bearing: 320 + cos(Double(phase) * 0.45) * 24)
+        let beamBearing = 80 + Double(phase) * 22
+        let beam = simulationOrbit(around: beamBase, radius: orbit * 0.22, bearing: beamBearing)
+        return [
+            SimulationContact(id: "crop-run", kind: .ufo, title: "UFO CROP RUN", subtitle: "fictional · tracing circles", summary: "Looping low over the field and redrawing the crop-circle pattern.", lat: cropUFO.coord.latitude, lon: cropUFO.coord.longitude, altM: max(280, orbit * 0.24), heading: cropUFO.heading, speedKt: cropUFO.speedKt, phase: phase),
+            SimulationContact(id: "deja-vu", kind: .dejaVu, title: "DÉJÀ VU LOOP", subtitle: "fictional · repeating path", summary: "A repeating route that intentionally doubles back to create a déjà vu effect.", lat: deja.coord.latitude, lon: deja.coord.longitude, altM: max(420, orbit * 0.3), heading: deja.heading, speedKt: deja.speedKt, phase: phase % 12),
+            SimulationContact(id: "abduction", kind: .abduction, title: "ABDUCTION FLYOVER", subtitle: "fictional · beam sweep", summary: "A scripted flyover with a moving beam marker near the surface.", lat: beam.coord.latitude, lon: beam.coord.longitude, altM: max(550, orbit * 0.4), heading: beam.heading, speedKt: beam.speedKt, phase: phase % 10),
+            SimulationContact(id: "crop-circle", kind: .cropCircle, title: "CROP CIRCLE", subtitle: "fictional · ground imprint", summary: "A static ground marker that the nearby UFO orbit keeps revisiting.", lat: cropCenter.latitude, lon: cropCenter.longitude, altM: 0, heading: 0, speedKt: 0, phase: phase % 6)
+        ]
+    }
+
+    var simulationOverlays: [SimulationOverlay] {
+        guard layers.contains(.simulation), let anchor = simulationAnchor else { return [] }
+        let orbit = min(max(distance * 0.07, 1_800), 12_000)
+        let cropCenter = anchor.moved(meters: orbit * 0.52, bearing: 210)
+        let beamBase = anchor.moved(meters: orbit * 0.3, bearing: 320 + cos(Double(simulationTick) * 0.45) * 24)
+        let corridor = Geo.cone(at: beamBase, heading: 35 + sin(Double(simulationTick) * 0.3) * 18, fov: 26, range: orbit * 0.42)
+        return [
+            SimulationOverlay(id: "crop-rings", kind: .cropCircle, title: "Crop circles", rings: [
+                circleRing(center: cropCenter, radius: orbit * 0.12),
+                circleRing(center: cropCenter, radius: orbit * 0.22),
+                circleRing(center: cropCenter, radius: orbit * 0.34)
+            ], focus: cropCenter),
+            SimulationOverlay(id: "beam-corridor", kind: .abduction, title: "Beam corridor", rings: [corridor], focus: beamBase)
+        ]
     }
 
     var timelineEvents: [Entity] {
@@ -685,6 +809,7 @@ final class AppState: ObservableObject {
         if layers.contains(.space) { await refreshSpace() }
         if layers.contains(.radar) || layers.contains(.satir) { await radar.load(); rebuildRadar() }
         if !cctv.watching.isEmpty && cameras.isEmpty { await refreshCameras() }
+        if layers.contains(.simulation) { startSimulation() }
         if let u = pendingDeepLink { pendingDeepLink = nil; open(url: u) }
     }
 
@@ -721,7 +846,7 @@ final class AppState: ObservableObject {
         satTask?.cancel()
         satTask = Task { [weak self] in
             while !Task.isCancelled {
-                let secs: UInt64 = (self?.performanceMode ?? true) ? 5 : 3
+                let secs: UInt64 = (self?.performanceMode ?? true) ? 5 : 4
                 try? await Task.sleep(nanoseconds: secs * 1_000_000_000)
                 guard let self, !Task.isCancelled else { return }
                 if self.layers.contains(.satellites) { self.propagate() }
@@ -893,13 +1018,18 @@ final class AppState: ObservableObject {
         if userMoved, isTracking, let tc = trackedCoord, center.distance(to: tc) > max(distance * 0.6, 20_000) {
             stopTracking(silent: true)
         }
-        if contactCap != prevCap || contactCap > 0 || layers.contains(.ships) || layers.contains(.cctv) { rebuildDisplay() }
+        if shouldRebuildDisplayOnCameraChange(prevCap: prevCap) { rebuildDisplay() }
         if let last = lastContactFetchCenter, last.distance(to: center) > 200_000, !isTracking {
             Task { await refreshContacts(force: true) }
         }
         if layers.contains(.ships), ais.needsResubscribe(for: center) { connectAIS() }
         if userMoved && orbiting { stopOrbit() }
         if userMoved && scenePlaying { stopScene() }
+        if layers.contains(.simulation), updateSimulationAnchor(thresholdScale: 0.4) {
+            simulationRevision &+= 1
+            refreshSelectedSimulation()
+            rebuildDisplay()
+        }
         let moved = lastRegionFetch.map { $0.center.distance(to: center) > max(distance * 0.5, 5_000) || Date().timeIntervalSince($0.at) > 120 } ?? true
         if moved {
             lastRegionFetch = (center, Date())
@@ -928,6 +1058,22 @@ final class AppState: ObservableObject {
             guard !Task.isCancelled else { return }
             centerName = name.title.uppercased()
         }
+    }
+
+    private func shouldRebuildDisplayOnCameraChange(prevCap: Int) -> Bool {
+        if contactCap != prevCap { return true }
+        let contactLayers = layers.contains(.flights) || layers.contains(.military)
+        let contactViewport = contactLayers && contactCap > 0
+        let viewportLayers = !layers.intersection(cameraRebuildLayers).isEmpty
+        guard contactViewport || viewportLayers else { return false }
+        guard let last = lastDisplaySample else { return true }
+        let moveThreshold = max(distance * (contactViewport ? 0.08 : (show3D ? 0.08 : 0.12)), layers.contains(.cctv) ? 2_500 : (contactViewport ? 8_000 : 12_000))
+        let zoomThreshold = max(distance * 0.16, 20_000)
+        return last.center.distance(to: center) > moveThreshold || abs(last.distance - distance) > zoomThreshold
+    }
+
+    private var cameraRebuildLayers: Set<Layer> {
+        [.ships, .satellites, .cctv, .fires, .bikeshare, .radio, .cables, .airports, .stations, .alerts, .trains, .peaks, .simulation]
     }
 
     func reverseGeocode(_ c: CLLocationCoordinate2D) async -> (title: String, detail: String, extraMeta: [MetaRow]) {
@@ -1048,6 +1194,7 @@ final class AppState: ObservableObject {
         trackedCoord = e.coord
         trackedHeading = e.heading
         trail = [e.coord]
+        lastTrackTrailID = nil
         satTrack = []
         lastTrackedFix = nil
         if e.kind == .aircraft || e.kind == .military,
@@ -1103,6 +1250,7 @@ final class AppState: ObservableObject {
         trackedEntity = nil
         trackedCoord = nil
         trail = []
+        lastTrackTrailID = nil
         satTrack = []
         chase = false
         traceHistory = []
@@ -1130,7 +1278,24 @@ final class AppState: ObservableObject {
 
     /// Dead-reckon the tracked aircraft between polls; snap on new fixes.
     private func trackTick(fromPoll: Bool) {
-        guard let tid = trackedID, tid.hasPrefix("ac-") else { return }
+        guard let tid = trackedID else { return }
+        if tid.hasPrefix("sim-") {
+            guard let sim = simulationContacts.first(where: { "sim-\($0.id)" == tid }) else { return }
+            trackedEntity = Entity.from(sim)
+            trackedHeading = sim.heading
+            trackedCoord = sim.coord
+            if lastTrackTrailID != tid {
+                trail = [sim.coord]
+                lastTrackTrailID = tid
+            } else {
+                trail.append(sim.coord)
+            }
+            if trail.count > 120 { trail.removeFirst(trail.count - 120) }
+            followCamera(animated: true, duration: 0.8)
+            if let te = trackedEntity { LiveActivityManager.shared.update(te, coord: sim.coord) }
+            return
+        }
+        guard tid.hasPrefix("ac-") else { return }
         if fromPoll {
             guard let c = (contacts + militaryContacts).first(where: { "ac-\($0.id)" == tid }) else { return }
             lastTrackedFix = (c.coord, c.seenAt, c.groundSpeedKt ?? 0, c.track)

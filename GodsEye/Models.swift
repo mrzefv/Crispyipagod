@@ -6,7 +6,7 @@ import SwiftUI
 
 enum Layer: String, CaseIterable, Identifiable, Codable {
     case flights, military, ships, satellites, quakes, launches, cctv, traffic, fires, bikeshare, radio, infra, cables, airport
-    case radar, satir, wind, power, rail, trains, airports, stations, alerts, space, scanner, peaks, residential
+    case radar, satir, wind, power, rail, trains, airports, stations, alerts, space, scanner, peaks, residential, simulation
     var id: String { rawValue }
 
     var title: String {
@@ -38,6 +38,7 @@ enum Layer: String, CaseIterable, Identifiable, Codable {
         case .scanner: return "Scanner Feeds"
         case .peaks: return "Peaks & Terrain"
         case .residential: return "Residential Blueprints"
+        case .simulation: return "Paranormal Simulation"
         }
     }
     var icon: String {
@@ -69,6 +70,7 @@ enum Layer: String, CaseIterable, Identifiable, Codable {
         case .scanner: return "antenna.radiowaves.left.and.right"
         case .peaks: return "mountain.2"
         case .residential: return "house.lodge"
+        case .simulation: return "sparkles"
         }
     }
     var source: String {
@@ -100,6 +102,7 @@ enum Layer: String, CaseIterable, Identifiable, Codable {
         case .scanner: return "Broadcastify"
         case .peaks: return "OSM · Open-Meteo"
         case .residential: return "OSM Overpass"
+        case .simulation: return "on-device fiction"
         }
     }
     var needsKey: Bool { self == .ships || self == .fires }
@@ -855,6 +858,53 @@ struct AuroraPoint: Identifiable, Equatable {
     var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
 }
 
+// MARK: - Fictional simulation
+
+enum SimulationKind: String, Codable {
+    case ufo, cropCircle, dejaVu, abduction
+
+    var icon: String {
+        switch self {
+        case .ufo: return "🛸"
+        case .cropCircle: return "◎"
+        case .dejaVu: return "⟲"
+        case .abduction: return "✦"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .ufo: return "UFO"
+        case .cropCircle: return "Crop Circle"
+        case .dejaVu: return "Déjà Vu Loop"
+        case .abduction: return "Abduction Flyover"
+        }
+    }
+}
+
+struct SimulationContact: Identifiable {
+    let id: String
+    let kind: SimulationKind
+    let title: String
+    let subtitle: String
+    let summary: String
+    let lat: Double
+    let lon: Double
+    let altM: Double
+    let heading: Double
+    let speedKt: Double
+    let phase: Int
+    var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
+}
+
+struct SimulationOverlay: Identifiable {
+    let id: String
+    let kind: SimulationKind
+    let title: String
+    let rings: [[CLLocationCoordinate2D]]
+    let focus: CLLocationCoordinate2D
+}
+
 // MARK: - Unified entity (what the detail sheet renders)
 
 struct MetaRow: Identifiable, Equatable {
@@ -867,7 +917,7 @@ struct MetaRow: Identifiable, Equatable {
 struct Entity: Identifiable, Equatable {
     enum Kind: String, Codable, CaseIterable {
         case aircraft, military, ship, earthquake, satellite, launch, camera, place, fire, bike, radio, infra, cable
-        case train, airport, station, alert, scanner, peak, storm
+        case train, airport, station, alert, scanner, peak, storm, simulation
         var icon: String {
             switch self {
             case .aircraft: return "airplane"
@@ -890,6 +940,7 @@ struct Entity: Identifiable, Equatable {
             case .scanner: return "antenna.radiowaves.left.and.right"
             case .peak: return "mountain.2"
             case .storm: return "cloud.bolt.rain"
+            case .simulation: return "sparkles"
             }
         }
         var label: String {
@@ -914,6 +965,7 @@ struct Entity: Identifiable, Equatable {
             case .scanner: return "SCANNER"
             case .peak: return "TERRAIN"
             case .storm: return "STORM CELL"
+            case .simulation: return "SIMULATION"
             }
         }
         var color: Color {
@@ -938,9 +990,10 @@ struct Entity: Identifiable, Equatable {
             case .scanner: return Color(red: 1.0, green: 0.85, blue: 0.3)
             case .peak: return Color(red: 0.8, green: 0.75, blue: 0.6)
             case .storm: return Color(red: 0.4, green: 0.7, blue: 1.0)
+            case .simulation: return Color(red: 0.65, green: 1.0, blue: 0.7)
             }
         }
-        var trackable: Bool { self == .aircraft || self == .military || self == .ship || self == .satellite || self == .train || self == .storm }
+        var trackable: Bool { self == .aircraft || self == .military || self == .ship || self == .satellite || self == .train || self == .storm || self == .simulation }
     }
 
     let id: String
@@ -1165,6 +1218,14 @@ struct Entity: Identifiable, Equatable {
                lat: s.lat, lon: s.lon, time: Date(),
                meta: [MetaRow("Heading", "\(Int(s.headingDeg))°"), MetaRow("Speed", "\(Int(s.speedKmh)) km/h"), MetaRow("Source", "RainViewer frames")],
                url: nil, viewDistance: 120_000, imageURL: nil, heading: s.headingDeg)
+    }
+
+    static func from(_ s: SimulationContact) -> Entity {
+        Entity(id: "sim-\(s.id)", kind: .simulation, title: s.title, subtitle: s.subtitle,
+               summary: s.summary,
+               lat: s.lat, lon: s.lon, time: Date(),
+               meta: [MetaRow("Scenario", s.kind.title), MetaRow("Altitude", s.altM > 0 ? "\(Int(s.altM)) m AGL" : "ground marker"), MetaRow("Loop step", "\(s.phase)"), MetaRow("Source", "On-device simulation")],
+               url: nil, viewDistance: max(1_500, s.altM > 0 ? 25_000 : 8_000), imageURL: nil, heading: s.heading)
     }
 
     static func from(_ c: Cable) -> Entity {
