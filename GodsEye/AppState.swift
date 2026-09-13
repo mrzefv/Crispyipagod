@@ -613,9 +613,11 @@ final class AppState: ObservableObject {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 guard let self, !Task.isCancelled else { return }
-                self.simulationTick &+= 1
-                if Date().timeIntervalSince(self.lastSimulationAnchorAt) > 12 {
-                    if self.updateSimulationAnchor() { self.simulationTick &+= 1 }
+                await MainActor.run {
+                    self.simulationTick &+= 1
+                    if Date().timeIntervalSince(self.lastSimulationAnchorAt) > 12 {
+                        if self.updateSimulationAnchor() { self.simulationTick &+= 1 }
+                    }
                 }
             }
         }
@@ -626,6 +628,7 @@ final class AppState: ObservableObject {
         simulationTask = nil
         simulationAnchor = nil
         simulationTick = 0
+        if selected?.kind == .simulation { selected = nil }
     }
 
     func listen(_ f: ScannerFeed) {
