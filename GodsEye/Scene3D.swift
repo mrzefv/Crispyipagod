@@ -239,6 +239,13 @@ struct Scene3DView: View {
     }
 
     private func jsBool(_ value: Bool) -> String { value ? "true" : "false" }
+    private func jsQuoted(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+    }
 
     private func pill(_ title: String, icon: String, active: Bool, tint: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -262,8 +269,12 @@ struct Scene3DView: View {
             ready = true
             status = "\(s.basemap.title) · tap to inspect"
             let assets = s.ionAssets.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
-            let gkey = (s.googleMapsKey.isEmpty ? CesiumConfig.defaultGoogleKey : s.googleMapsKey).replacingOccurrences(of: "'", with: "")
-            bridge.eval("GE.init({basemap:'\(s.basemap.rawValue)', terrain:\(s.sceneTerrain), buildings:\(s.sceneBuildings), assets:\(assets), sensor:'\(s.sensor.rawValue)', hud:\(s.hud), accent:'\(s.accentHex)', googleKey:'\(gkey)', realism:'\(s.sceneRealism)', space:\(jsBool(s.layers.contains(.space)))})")
+            let basemap = jsQuoted(s.basemap.rawValue)
+            let sensor = jsQuoted(s.sensor.rawValue)
+            let accent = jsQuoted(s.accentHex)
+            let realism = jsQuoted(s.sceneRealism)
+            let gkey = jsQuoted(s.googleMapsKey.isEmpty ? CesiumConfig.defaultGoogleKey : s.googleMapsKey)
+            bridge.eval("GE.init({basemap:'\(basemap)', terrain:\(s.sceneTerrain), buildings:\(s.sceneBuildings), assets:\(assets), sensor:'\(sensor)', hud:\(s.hud), accent:'\(accent)', googleKey:'\(gkey)', realism:'\(realism)', space:\(jsBool(s.layers.contains(.space)))})")
             let h = max(s.distance, 300)
             bridge.eval(String(format: "GE.setView(%.6f,%.6f,%.1f,%.2f,%.2f)", s.center.latitude, s.center.longitude, h, s.heading, s.pitch))
             pushEntities()
@@ -949,7 +960,7 @@ window.GE = (() => {
     }
     try {
       const next = await Cesium.createOsmBuildingsAsync();
-      if (req !== buildingReq.token || !buildingReq.on) return;
+      if (req !== buildingReq.token || !buildingReq.on) { if (next && typeof next.destroy === 'function') next.destroy(); return; }
       buildingReq.loading = false;
       buildings = next;
       viewer.scene.primitives.add(buildings);
