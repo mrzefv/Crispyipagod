@@ -115,6 +115,16 @@ for ty in range(0, H, step):
         m.visual = trimesh.visual.TextureVisuals(uv=np.column_stack([UU.ravel(), VV.ravel()]), image=crop)
         fn = f"m_{tx // step}_{ty // step}.glb"
         m.export(os.path.join(out, fn))
+        # OBJ + MTL + JPG twin for the native (SceneKit) structure viewer
+        stem = fn[:-4]
+        crop.convert("RGB").save(os.path.join(out, stem + ".jpg"), quality=85)
+        with open(os.path.join(out, stem + ".mtl"), "w") as f: f.write(f"newmtl ortho\nKa 1 1 1\nKd 1 1 1\nKs 0 0 0\nmap_Kd {stem}.jpg\n")
+        uvs = np.column_stack([UU.ravel(), 1.0 - VV.ravel()])
+        with open(os.path.join(out, stem + ".obj"), "w") as f:
+            f.write(f"mtllib {stem}.mtl\nusemtl ortho\n")
+            f.write("".join(f"v {x:.3f} {y:.3f} {z:.3f}\n" for x, y, z in Vg))
+            f.write("".join(f"vt {u:.5f} {v:.5f}\n" for u, v in uvs))
+            f.write("".join(f"f {a1+1}/{a1+1} {b1+1}/{b1+1} {c1+1}/{c1+1}\n" for a1, b1, c1 in F))
         cx = (cols[0] + cols[-1]) / 2; cy = (rows[0] + rows[-1]) / 2; zc = float((sub.max() + sub.min()) / 2); zh = float((sub.max() - sub.min()) / 2 + 1)
         children.append({"boundingVolume": {"box": [float(cx), float(cy), zc, (cols[-1] - cols[0]) / 2 + 1, 0, 0, 0, (rows[0] - rows[-1]) / 2 + 1, 0, 0, 0, zh]},
                          "geometricError": 0, "content": {"uri": fn}})
@@ -122,5 +132,6 @@ tileset = {"asset": {"version": "1.1", "generator": "godseye-tiles mesh.py"}, "g
            "root": {"transform": enu_to_ecef_matrix(lat0, lon0, base), "boundingVolume": {"box": [0, 0, float(dsm.max() / 2), half + 2, 0, 0, 0, half + 2, 0, 0, 0, float(dsm.max() / 2 + 2)]},
                     "geometricError": 120, "refine": "ADD", "children": children}}
 json.dump(tileset, open(os.path.join(out, "tileset.json"), "w"))
-write_meta(out, {"kind": "tileset", "name": f"{a.name} · realism mesh", "url": "tileset.json", "bbox": bbox, "tiles": len(children), "baseHeight": base, "credit": "USGS 3DEP + USDA NAIP · MRzefv"})
+write_meta(out, {"kind": "tileset", "name": f"{a.name} · realism mesh", "url": "tileset.json", "bbox": bbox, "tiles": len(children), "baseHeight": base,
+                 "center": [lat0, lon0], "tileM": a.tile_m, "half": half, "cell": a.cell, "credit": "USGS 3DEP + USDA NAIP · MRzefv"})
 print("done", out, len(children), "tiles")

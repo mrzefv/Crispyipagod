@@ -19,7 +19,7 @@ struct DetailSheet: View {
                 if let img = entity.imageURL, let url = URL(string: img + "?t=\(imageTick)") { cameraImage(url) }
                 summaryBlock
                 metaGrid
-                if entity.kind == .place { PlaceRecordsView(entity: entity) }
+                if entity.kind == .place { StructureView(entity: entity); PlaceRecordsView(entity: entity) }
                 HStack(spacing: 8) {
                     if let u = entity.url, let url = URL(string: u) {
                         Button { openURL(url) } label: { Label("Source", systemImage: "arrow.up.right.square") }
