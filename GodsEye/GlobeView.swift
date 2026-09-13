@@ -486,13 +486,16 @@ struct GlobeView: View {
             }
             ForEach(s.simulationContacts) { sim in
                 Annotation(sim.title, coordinate: sim.coord, anchor: sim.altM > 0 ? .bottom : .center) {
-                    ZStack {
-                        Circle().fill(Color.black.opacity(0.45)).frame(width: sim.altM > 0 ? 28 : 22, height: sim.altM > 0 ? 28 : 22)
-                        Circle().stroke(Color(red: 0.65, green: 1.0, blue: 0.7), lineWidth: 1.4).frame(width: sim.altM > 0 ? 28 : 22, height: sim.altM > 0 ? 28 : 22)
-                        Text(sim.kind.icon).font(.system(size: sim.altM > 0 ? 15 : 12))
+                    Button { s.select(Entity.from(sim)) } label: {
+                        ZStack {
+                            Circle().fill(Color.black.opacity(0.45)).frame(width: sim.altM > 0 ? 28 : 22, height: sim.altM > 0 ? 28 : 22)
+                            Circle().stroke(Color(red: 0.65, green: 1.0, blue: 0.7), lineWidth: 1.4).frame(width: sim.altM > 0 ? 28 : 22, height: sim.altM > 0 ? 28 : 22)
+                            Text(sim.kind.icon).font(.system(size: sim.altM > 0 ? 15 : 12))
+                        }
                     }
-                    .contentShape(Rectangle())
-                    .onTapGesture { s.select(Entity.from(sim)) }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(sim.title)
+                    .accessibilityValue(sim.subtitle)
                 }
                 .annotationTitles(s.showLabels && s.distance < 180_000 ? .visible : .hidden)
             }

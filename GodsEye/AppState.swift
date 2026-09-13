@@ -617,6 +617,7 @@ final class AppState: ObservableObject {
                 guard let self, !Task.isCancelled else { return }
                 await MainActor.run {
                     self.simulationTick &+= 1
+                    self.trackTick(fromPoll: false)
                     if Date().timeIntervalSince(self.lastSimulationAnchorAt) > 12 {
                         if self.updateSimulationAnchor() {
                             self.simulationRevision &+= 1
