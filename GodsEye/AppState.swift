@@ -51,6 +51,7 @@ final class AppState: ObservableObject {
             if layers.contains(.bikeshare) { Task { await refreshBikes() } }
             if layers.contains(.infra) { Task { await refreshInfra() } }
             if layers.contains(.airport) { Task { await refreshAirport() } }
+            if layers.contains(.residential) { Task { await refreshResidential() } } else { residential = [] }
             if layers.contains(.radar) || layers.contains(.satir) { Task { if radar.frames.isEmpty { await radar.load() }; rebuildRadar() } } else { radar.composite = nil; radar.satComposite = nil }
             if layers.contains(.wind) { Task { await refreshWind() } }
             if layers.contains(.power) { Task { await refreshPower() } }
@@ -75,6 +76,7 @@ final class AppState: ObservableObject {
     @Published var radioStations: [RadioStation] = []
     @Published var infra: [InfraNode] = []
     @Published var airportFeatures: [AirportFeature] = []
+    @Published var residential: [ResidentialBlueprint] = []
     @Published var cables: [Cable] = []
     @Published private(set) var visibleFires: [Fire] = []
     @Published private(set) var visibleBikes: [BikeStation] = []
@@ -820,6 +822,11 @@ final class AppState: ObservableObject {
         do { airportFeatures = try await Feeds.shared.airport(center: center) } catch { feedErrors += 1 }
     }
 
+    func refreshResidential() async {
+        guard layers.contains(.residential), distance < 6_000 else { residential = []; return }
+        do { residential = try await Feeds.shared.residentialBlueprints(center: center, spanDeg: max(0.006, distance / 111_000 * 0.6)) } catch { feedErrors += 1 }
+    }
+
     func refreshCables() async {
         do { cables = try await Feeds.shared.cables(); rebuildDisplay() } catch { feedErrors += 1 }
     }
@@ -828,6 +835,7 @@ final class AppState: ObservableObject {
         if layers.contains(.fires) { await refreshFires() }
         if layers.contains(.bikeshare) { await refreshBikes() }
         if layers.contains(.infra) { await refreshInfra() }
+        if layers.contains(.residential) { await refreshResidential() }
         if layers.contains(.airport) { await refreshAirport() }
         await refreshContacts(force: true)
         await refreshQuakes()
@@ -894,6 +902,7 @@ final class AppState: ObservableObject {
                 if layers.contains(.bikeshare) { await refreshBikes() }
                 if layers.contains(.infra) { await refreshInfra() }
                 if layers.contains(.airport) { await refreshAirport() }
+                if layers.contains(.residential) { await refreshResidential() }
                 if layers.contains(.fires), fires.isEmpty || distance < 500_000 { await refreshFires() }
                 if layers.contains(.wind) { await refreshWind() }
                 if layers.contains(.power) { await refreshPower() }

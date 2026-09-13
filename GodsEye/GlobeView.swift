@@ -357,6 +357,27 @@ struct GlobeView: View {
             }
         }
 
+        // Residential blueprints (OSM building footprints, <6 km)
+        if s.layers.contains(.residential), s.distance < 6_000 {
+            ForEach(s.residential) { b in
+                MapPolygon(coordinates: b.points)
+                    .foregroundStyle(b.kind.fill)
+                    .stroke(b.kind.stroke, lineWidth: 1)
+            }
+            ForEach(s.residential.prefix(150)) { b in
+                Annotation("", coordinate: ResidentialGeo.centroid(b.points), anchor: .center) {
+                    Color.clear.frame(width: 18, height: 18).contentShape(Rectangle())
+                        .onTapGesture {
+                            let c = ResidentialGeo.centroid(b.points)
+                            s.select(Entity.place(lat: c.latitude, lon: c.longitude, name: b.name, detail: "Residential · \(b.kind.rawValue)" + (b.levels.map { " · \($0) levels" } ?? ""), distance: 1_500,
+                                                  summary: "OSM building footprint · \(b.points.count) vertices",
+                                                  extraMeta: [MetaRow("Building", b.kind.rawValue), MetaRow("Levels", b.levels ?? "—"), MetaRow("Source", "OpenStreetMap Overpass")]))
+                        }
+                }
+                .annotationTitles(.hidden)
+            }
+        }
+
         // Camera viewsheds
         if s.viewsheds, s.layers.contains(.cctv), s.distance < 6_000 {
             ForEach(s.visibleCameras) { cam in
@@ -1298,6 +1319,7 @@ struct LayersSheet: View {
         case .space: return "Kp \(String(format: "%.1f", s.space.kp)) · \(s.space.stormLevel)"
         case .scanner: return "\(s.scanners.count) feeds"
         case .peaks: return s.peaks.isEmpty ? "zoom in (<300 km)" : "\(s.peaks.count) peaks"
+        case .residential: return s.distance >= 6_000 ? "zoom in (<6 km)" : "\(s.residential.count) footprints"
         }
     }
 }
@@ -1636,5 +1658,14 @@ struct RadarOverlays: View {
                 RadarOverlayView(composite: c, proxy: proxy, opacity: s.radarOpacity, heading: s.heading, pitch: s.pitch)
             }
         }
+    }
+}
+
+enum ResidentialGeo {
+    static func centroid(_ pts: [CLLocationCoordinate2D]) -> CLLocationCoordinate2D {
+        guard !pts.isEmpty else { return .init(latitude: 0, longitude: 0) }
+        let la = pts.reduce(0) { $0 + $1.latitude } / Double(pts.count)
+        let lo = pts.reduce(0) { $0 + $1.longitude } / Double(pts.count)
+        return .init(latitude: la, longitude: lo)
     }
 }
