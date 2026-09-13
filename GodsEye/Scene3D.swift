@@ -365,7 +365,6 @@ struct Scene3DView: View {
         if let c = (s.contacts + s.militaryContacts).first(where: { "ac-\($0.id)" == id }) { s.track(Entity.from(c)) }
         else if let v = s.ships.values.first(where: { "sh-\($0.id)" == id }) { s.track(Entity.from(v)) }
         else if let sim = s.simulationContacts.first(where: { "sim-\($0.id)" == id }) { s.track(Entity.from(sim)) }
-        else if let sim = s.simulationContacts.first(where: { "sim-\($0.id)" == id }) { s.track(Entity.from(sim)) }
     }
 
     private func pushEntities(force: Bool = false) {
@@ -507,7 +506,7 @@ struct Scene3DView: View {
         let v = s.ships.values.first { "sh-\($0.id)" == te.id }
         let sim = s.simulationContacts.first { "sim-\($0.id)" == te.id }
         return ["id": te.id, "lat": tc.latitude, "lon": tc.longitude, "alt": sim?.altM ?? Double(c?.altFt ?? 0) * 0.3048,
-                "heading": sim?.heading ?? c?.track ?? v?.cog ?? 0, "spd": c?.groundSpeedKt ?? v?.sogKt ?? 0, "label": te.title, "kind": te.kind.rawValue,
+                "heading": sim?.heading ?? c?.track ?? v?.cog ?? 0, "spd": sim?.speedKt ?? c?.groundSpeedKt ?? v?.sogKt ?? 0, "label": te.title, "kind": te.kind.rawValue,
                 "sub": sim?.subtitle ?? [c?.type ?? "", c?.registration ?? "", c?.military == true ? "MILITARY" : ""].filter { !$0.isEmpty }.joined(separator: " · "),
                 "ts": Date().timeIntervalSince1970,
                 "model": c.map { aircraftModel($0) } ?? v.map { shipModel($0) } ?? "",

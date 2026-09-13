@@ -254,6 +254,7 @@ final class AppState: ObservableObject {
     private var lastDisplaySample: (center: CLLocationCoordinate2D, distance: Double)?
     private var simulationAnchor: CLLocationCoordinate2D?
     private var lastSimulationAnchorAt = Date.distantPast
+    private var lastTrackTrailID: String?
     private var geocoder = CLGeocoder()
     private var geocodeTask: Task<Void, Never>?
     private var pendingDeepLink: URL?
@@ -694,10 +695,10 @@ final class AppState: ObservableObject {
         return ranked
     }
 
-    private func simulationOrbit(around c: CLLocationCoordinate2D, radius: Double, bearing: Double, step: Double = 12) -> (coord: CLLocationCoordinate2D, heading: Double) {
+    private func simulationOrbit(around c: CLLocationCoordinate2D, radius: Double, bearing: Double, step: Double = 12, secondsPerStep: Double = 2) -> (coord: CLLocationCoordinate2D, heading: Double, speedKt: Double) {
         let coord = c.moved(meters: radius, bearing: bearing)
         let next = c.moved(meters: radius, bearing: bearing + step)
-        return (coord, Geo.bearing(from: coord, to: next))
+        return (coord, Geo.bearing(from: coord, to: next), coord.distance(to: next) / max(secondsPerStep, 0.5) / 0.514444)
     }
 
     private func circleRing(center: CLLocationCoordinate2D, radius: Double, points: Int = 36) -> [CLLocationCoordinate2D] {
@@ -717,10 +718,10 @@ final class AppState: ObservableObject {
         let beamBearing = 80 + Double(phase) * 22
         let beam = simulationOrbit(around: beamBase, radius: orbit * 0.22, bearing: beamBearing)
         return [
-            SimulationContact(id: "crop-run", kind: .ufo, title: "UFO CROP RUN", subtitle: "fictional · tracing circles", summary: "Looping low over the field and redrawing the crop-circle pattern.", lat: cropUFO.coord.latitude, lon: cropUFO.coord.longitude, altM: max(280, orbit * 0.24), heading: cropUFO.heading, phase: phase),
-            SimulationContact(id: "deja-vu", kind: .dejaVu, title: "DÉJÀ VU LOOP", subtitle: "fictional · repeating path", summary: "A repeating route that intentionally doubles back to create a déjà vu effect.", lat: deja.coord.latitude, lon: deja.coord.longitude, altM: max(420, orbit * 0.3), heading: deja.heading, phase: phase % 12),
-            SimulationContact(id: "abduction", kind: .abduction, title: "ABDUCTION FLYOVER", subtitle: "fictional · beam sweep", summary: "A scripted flyover with a moving beam marker near the surface.", lat: beam.coord.latitude, lon: beam.coord.longitude, altM: max(550, orbit * 0.4), heading: beam.heading, phase: phase % 10),
-            SimulationContact(id: "crop-circle", kind: .cropCircle, title: "CROP CIRCLE", subtitle: "fictional · ground imprint", summary: "A static ground marker that the nearby UFO orbit keeps revisiting.", lat: cropCenter.latitude, lon: cropCenter.longitude, altM: 0, heading: 0, phase: phase % 6)
+            SimulationContact(id: "crop-run", kind: .ufo, title: "UFO CROP RUN", subtitle: "fictional · tracing circles", summary: "Looping low over the field and redrawing the crop-circle pattern.", lat: cropUFO.coord.latitude, lon: cropUFO.coord.longitude, altM: max(280, orbit * 0.24), heading: cropUFO.heading, speedKt: cropUFO.speedKt, phase: phase),
+            SimulationContact(id: "deja-vu", kind: .dejaVu, title: "DÉJÀ VU LOOP", subtitle: "fictional · repeating path", summary: "A repeating route that intentionally doubles back to create a déjà vu effect.", lat: deja.coord.latitude, lon: deja.coord.longitude, altM: max(420, orbit * 0.3), heading: deja.heading, speedKt: deja.speedKt, phase: phase % 12),
+            SimulationContact(id: "abduction", kind: .abduction, title: "ABDUCTION FLYOVER", subtitle: "fictional · beam sweep", summary: "A scripted flyover with a moving beam marker near the surface.", lat: beam.coord.latitude, lon: beam.coord.longitude, altM: max(550, orbit * 0.4), heading: beam.heading, speedKt: beam.speedKt, phase: phase % 10),
+            SimulationContact(id: "crop-circle", kind: .cropCircle, title: "CROP CIRCLE", subtitle: "fictional · ground imprint", summary: "A static ground marker that the nearby UFO orbit keeps revisiting.", lat: cropCenter.latitude, lon: cropCenter.longitude, altM: 0, heading: 0, speedKt: 0, phase: phase % 6)
         ]
     }
 
@@ -1192,6 +1193,7 @@ final class AppState: ObservableObject {
         trackedCoord = e.coord
         trackedHeading = e.heading
         trail = [e.coord]
+        lastTrackTrailID = nil
         satTrack = []
         lastTrackedFix = nil
         if e.kind == .aircraft || e.kind == .military,
@@ -1247,6 +1249,7 @@ final class AppState: ObservableObject {
         trackedEntity = nil
         trackedCoord = nil
         trail = []
+        lastTrackTrailID = nil
         satTrack = []
         chase = false
         traceHistory = []
@@ -1280,7 +1283,12 @@ final class AppState: ObservableObject {
             trackedEntity = Entity.from(sim)
             trackedHeading = sim.heading
             trackedCoord = sim.coord
-            trail.append(sim.coord)
+            if lastTrackTrailID != tid {
+                trail = [sim.coord]
+                lastTrackTrailID = tid
+            } else {
+                trail.append(sim.coord)
+            }
             if trail.count > 120 { trail.removeFirst(trail.count - 120) }
             followCamera(animated: true, duration: 0.8)
             if let te = trackedEntity { LiveActivityManager.shared.update(te, coord: sim.coord) }

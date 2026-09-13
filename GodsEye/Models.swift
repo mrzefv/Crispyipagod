@@ -892,6 +892,7 @@ struct SimulationContact: Identifiable {
     let lon: Double
     let altM: Double
     let heading: Double
+    let speedKt: Double
     let phase: Int
     var coord: CLLocationCoordinate2D { .init(latitude: lat, longitude: lon) }
 }
