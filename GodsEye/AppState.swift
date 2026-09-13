@@ -627,6 +627,7 @@ final class AppState: ObservableObject {
     private func stopSimulation() {
         simulationTask?.cancel()
         simulationTask = nil
+        if trackedID?.hasPrefix("sim-") == true || trackedEntity?.kind == .simulation { stopTracking(silent: true) }
         simulationAnchor = nil
         simulationTick = 0
         simulationRevision &+= 1
@@ -1049,7 +1050,7 @@ final class AppState: ObservableObject {
         if contactCap != prevCap { return true }
         let contactLayers = layers.contains(.flights) || layers.contains(.military)
         let contactViewport = contactLayers && contactCap > 0
-        let viewportLayers = !layers.intersection(Set<Layer>([.ships, .satellites, .cctv, .fires, .bikeshare, .radio, .cables, .airports, .stations, .alerts, .trains])).isEmpty
+        let viewportLayers = !layers.intersection(Set<Layer>([.ships, .satellites, .cctv, .fires, .bikeshare, .radio, .cables, .airports, .stations, .alerts, .trains, .peaks])).isEmpty
         guard contactViewport || viewportLayers else { return false }
         guard let last = lastDisplaySample else { return true }
         let moveThreshold = max(distance * (contactViewport ? 0.08 : (show3D ? 0.08 : 0.12)), layers.contains(.cctv) ? 2_500 : (contactViewport ? 8_000 : 12_000))
