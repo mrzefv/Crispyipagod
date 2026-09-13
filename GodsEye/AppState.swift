@@ -1024,7 +1024,7 @@ final class AppState: ObservableObject {
         if layers.contains(.ships), ais.needsResubscribe(for: center) { connectAIS() }
         if userMoved && orbiting { stopOrbit() }
         if userMoved && scenePlaying { stopScene() }
-        if layers.contains(.simulation), updateSimulationAnchor(thresholdScale: 0.18) {
+        if layers.contains(.simulation), updateSimulationAnchor(thresholdScale: 0.4) {
             simulationRevision &+= 1
             refreshSelectedSimulation()
             rebuildDisplay()
