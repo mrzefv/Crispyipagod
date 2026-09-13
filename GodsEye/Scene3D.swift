@@ -135,7 +135,7 @@ struct Scene3DView: View {
             pushEntities(force: true)
         }
         .onChange(of: s.simulationRevision) { _, _ in
-            guard ready, s.layers.contains(.simulation) else { return }
+            guard ready else { return }
             pushEntities(force: true)
         }
         .onChange(of: ready) { _, isReady in
@@ -364,7 +364,9 @@ struct Scene3DView: View {
         guard ready else { return }
         var items: [[String: Any]] = []
         if s.sceneEntities {
-            let acs = s.visibleContacts
+            let baseContacts = s.visibleContacts
+            let extraMilitary = dense ? Array(s.militaryContacts.filter { c in !baseContacts.contains(where: { $0.id == c.id }) }.prefix(120)) : []
+            let acs = baseContacts + extraMilitary
             for c in acs.prefix(dense ? 500 : 320) {
                 items.append(["id": "ac-\(c.id)", "kind": "ac", "lat": c.lat, "lon": c.lon, "alt": Double(c.altFt ?? 0) * 0.3048,
                               "label": c.displayName, "heading": c.track, "mil": c.military, "spd": c.groundSpeedKt ?? 0, "model": aircraftModel(c),
@@ -435,7 +437,7 @@ struct Scene3DView: View {
         var sel: [String: Any] = [:]
         if let e = selected { sel = ["lat": e.lat, "lon": e.lon, "title": e.title, "kind": e.kind.rawValue] }
         let track = trackPayload()
-        let passToken = s.layers.contains(.simulation) ? (s.simulationTick % 10_000) : Int((s.lastUpdate?.timeIntervalSince1970 ?? 0) / 15) % 10_000
+        let passToken = s.layers.contains(.simulation) ? (s.simulationRevision % 10_000) : Int((s.lastUpdate?.timeIntervalSince1970 ?? 0) / 15) % 10_000
         let payload: [String: Any] = ["entities": items, "polys": polys, "selected": sel, "track": track,
                                       "counts": ["ac": s.contacts.count + s.militaryContacts.count, "sh": s.ships.count, "sat": s.satellites.count, "cam": s.cameras.count],
                                       "orb": s.satellites.count, "pass": passToken]

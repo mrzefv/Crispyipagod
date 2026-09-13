@@ -629,7 +629,7 @@ final class AppState: ObservableObject {
         simulationTask = nil
         simulationAnchor = nil
         simulationTick = 0
-        simulationRevision = 0
+        simulationRevision &+= 1
         if selected?.kind == .simulation { selected = nil }
     }
 
