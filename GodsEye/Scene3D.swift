@@ -102,9 +102,6 @@ struct Scene3DView: View {
     private let realismPresets: [(String, String, String)] = [("off", "Flat", "sun.min"), ("day", "Day", "sun.max.fill"), ("golden", "Golden", "sunset.fill"), ("night", "Night", "moon.stars.fill"), ("overcast", "Overcast", "cloud.fill")]
     @State private var shadows = false
     @State private var shadowHour: Double = 14
-    @State private var lastEntityPayload = ""
-    @State private var lastEntityRevision = ""
-    @State private var lastTrackPayload = ""
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -127,32 +124,8 @@ struct Scene3DView: View {
         .onChange(of: s.sceneEntities) { _, _ in pushEntities() }
         .onChange(of: s.sceneLines) { _, _ in pushEntities() }
         .onChange(of: s.propertyLines) { _, _ in pushEntities() }
-        .onChange(of: s.layers.contains(.space)) { _, on in
-            guard ready else { return }
-            bridge.eval("GE.setSpaceMode(\(jsBool(on)))")
-        }
-        .onChange(of: s.layers.contains(.simulation)) { _, _ in
-            guard ready else { return }
-            pushEntities(force: true)
-        }
-        .onChange(of: s.simulationTick) { _, _ in
-            guard ready, s.layers.contains(.simulation) else { return }
-            pushEntities(force: true)
-        }
-        .onChange(of: s.simulationRevision) { _, _ in
-            guard ready else { return }
-            pushEntities(force: true)
-        }
-        .onChange(of: ready) { _, isReady in
-            guard isReady else { return }
-            bridge.eval("GE.setSpaceMode(\(jsBool(s.layers.contains(.space))))")
-        }
-        .onChange(of: s.trackedID) { _, _ in
-            pushEntities(force: true)
-            lastTrackPayload = ""
-            pushTrack()
-        }
-        .onChange(of: selected) { _, _ in pushEntities(force: true) }
+        .onChange(of: s.trackedID) { _, _ in pushEntities() }
+        .onChange(of: selected) { _, _ in pushEntities() }
         .onDisappear { pushTimer?.invalidate(); pushTimer = nil; trackTimer?.invalidate(); trackTimer = nil }
     }
 
@@ -257,15 +230,6 @@ struct Scene3DView: View {
             .background(Circle().fill(.ultraThinMaterial))
     }
 
-    private func jsBool(_ value: Bool) -> String { value ? "true" : "false" }
-    private func jsQuoted(_ value: String) -> String {
-        value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "\n", with: "\\n")
-            .replacingOccurrences(of: "\r", with: "\\r")
-    }
-
     private func pill(_ title: String, icon: String, active: Bool, tint: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
@@ -288,16 +252,12 @@ struct Scene3DView: View {
             ready = true
             status = "\(s.basemap.title) · tap to inspect"
             let assets = s.ionAssets.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
-            let basemap = jsQuoted(s.basemap.rawValue)
-            let sensor = jsQuoted(s.sensor.rawValue)
-            let accent = jsQuoted(s.accentHex)
-            let realism = jsQuoted(s.sceneRealism)
-            let gkey = jsQuoted(s.googleMapsKey.isEmpty ? CesiumConfig.defaultGoogleKey : s.googleMapsKey)
-            bridge.eval("GE.init({basemap:'\(basemap)', terrain:\(s.sceneTerrain), buildings:\(s.sceneBuildings), assets:\(assets), sensor:'\(sensor)', hud:\(s.hud), accent:'\(accent)', googleKey:'\(gkey)', realism:'\(realism)', space:\(jsBool(s.layers.contains(.space)))})")
+            let gkey = (s.googleMapsKey.isEmpty ? CesiumConfig.defaultGoogleKey : s.googleMapsKey).replacingOccurrences(of: "'", with: "")
+            bridge.eval("GE.init({basemap:'\(s.basemap.rawValue)', terrain:\(s.sceneTerrain), buildings:\(s.sceneBuildings), assets:\(assets), sensor:'\(s.sensor.rawValue)', hud:\(s.hud), accent:'\(s.accentHex)', googleKey:'\(gkey)', realism:'\(s.sceneRealism)'})")
             let h = max(s.distance, 300)
             bridge.eval(String(format: "GE.setView(%.6f,%.6f,%.1f,%.2f,%.2f)", s.center.latitude, s.center.longitude, h, s.heading, s.pitch))
-            pushEntities(force: true)
-            pushTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in pushEntities() }
+            pushEntities()
+            pushTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in pushEntities() }
             trackTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in pushTrack() }
             bridge.eval("GE.setFollow(\(follow))")
             Task { await reloadCatalog() }
@@ -358,54 +318,25 @@ struct Scene3DView: View {
         else if let ap = s.visibleAirports.first(where: { "apt-\($0.id)" == id }) { selected = Entity.from(ap) }
         else if let n = s.infra.first(where: { "infra-\($0.id)" == id }) { selected = Entity.from(n) }
         else if let st = s.storms.first(where: { "storm-\($0.id)" == id }) { selected = Entity.from(st) }
-        else if let sim = s.simulationContacts.first(where: { "sim-\($0.id)" == id }) { selected = Entity.from(sim) }
     }
 
     private func trackEntity(_ id: String) {
         if let c = (s.contacts + s.militaryContacts).first(where: { "ac-\($0.id)" == id }) { s.track(Entity.from(c)) }
         else if let v = s.ships.values.first(where: { "sh-\($0.id)" == id }) { s.track(Entity.from(v)) }
-        else if let sim = s.simulationContacts.first(where: { "sim-\($0.id)" == id }) { s.track(Entity.from(sim)) }
     }
 
-    private func pushEntities(force: Bool = false) {
+    private func pushEntities() {
         guard ready else { return }
-        let entityRevision = [
-            "dense:\(dense)",
-            "scene:\(s.sceneEntities)",
-            "lines:\(s.sceneLines)",
-            "sel:\(selected?.id ?? "-")",
-            "track:\(s.trackedID ?? "-")",
-            "ac:\(s.visibleContacts.prefix(dense ? 500 : 320).map(\.id).joined(separator: ","))",
-            "sh:\(s.visibleShips.prefix(dense ? 320 : 220).map(\.id).joined(separator: ","))",
-            "eq:\(s.visibleQuakes.prefix(400).map(\.id).joined(separator: ","))",
-            "fire:\(s.visibleFires.prefix(600).map(\.id).joined(separator: ","))",
-            "sat:\(s.visibleSatellites.prefix(300).map(\.id).joined(separator: ","))",
-            "train:\(s.visibleTrains.prefix(300).map(\.id).joined(separator: ","))",
-            "apt:\(s.visibleAirports.prefix(200).map(\.id).joined(separator: ","))",
-            "infra:\(s.infra.prefix(300).map(\.id).joined(separator: ","))",
-            "storm:\(s.storms.prefix(100).map(\.id).joined(separator: ","))",
-            "cam:\(s.visibleCameras.prefix(300).map(\.id).joined(separator: ","))",
-            "haz:\(s.visibleHazards.prefix(60).map(\.id).joined(separator: ","))",
-            "simp:\(s.layers.contains(.simulation) ? s.simulationOverlays.map(\.id).joined(separator: ",") : "off")",
-            "sim:\(s.layers.contains(.simulation) ? "\(s.simulationTick):\(s.simulationRevision)" : "off")",
-            "props:\(s.propertyLines.count)",
-            "regions:\(s.regions.count)"
-        ].joined(separator: "|")
-        if !force, entityRevision == lastEntityRevision { return }
-        lastEntityRevision = entityRevision
         var items: [[String: Any]] = []
         if s.sceneEntities {
-            let baseContacts = s.visibleContacts
-            let baseContactIDs = Set(baseContacts.map(\.id))
-            let extraMilitary = dense ? Array(s.militaryContacts.filter { !baseContactIDs.contains($0.id) }.prefix(120)) : []
-            let acs = baseContacts + extraMilitary
-            for c in acs.prefix(dense ? 500 : 320) {
+            let acs = dense ? (s.contacts + s.militaryContacts) : s.visibleContacts
+            for c in acs.prefix(dense ? 6000 : 500) {
                 items.append(["id": "ac-\(c.id)", "kind": "ac", "lat": c.lat, "lon": c.lon, "alt": Double(c.altFt ?? 0) * 0.3048,
                               "label": c.displayName, "heading": c.track, "mil": c.military, "spd": c.groundSpeedKt ?? 0, "model": aircraftModel(c),
                               "sub": [c.type ?? "", c.registration ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")])
             }
-            let shs = s.visibleShips
-            for v in shs.prefix(dense ? 320 : 220) {
+            let shs = dense ? Array(s.ships.values) : s.visibleShips
+            for v in shs.prefix(dense ? 3000 : 400) {
                 items.append(["id": "sh-\(v.id)", "kind": "sh", "lat": v.lat, "lon": v.lon, "alt": 0, "label": v.displayName, "heading": v.cog, "mil": false, "spd": v.sogKt, "sub": "MMSI \(v.id)", "model": shipModel(v)])
             }
             for q in s.visibleQuakes.prefix(400) {
@@ -436,11 +367,6 @@ struct Scene3DView: View {
                               "img": cam.imageURL, "sub": "\(cam.source)\(cam.isLiveVideo ? " · LIVE" : "")", "watch": s.cctv.watching.contains(cam.id), "model": "camera"])
             }
         }
-        if s.layers.contains(.simulation) {
-            for sim in s.simulationContacts {
-                items.append(["id": "sim-\(sim.id)", "kind": "sim", "lat": sim.lat, "lon": sim.lon, "alt": sim.altM, "label": sim.title, "heading": sim.heading, "mil": false, "sub": sim.subtitle, "icon": sim.kind.icon])
-            }
-        }
         var polys: [[String: Any]] = []
         if s.sceneLines {
             for p in s.propertyLines {
@@ -459,23 +385,13 @@ struct Scene3DView: View {
                 }
             }
         }
-        if s.layers.contains(.simulation) {
-            for sim in s.simulationOverlays {
-                for (i, ring) in sim.rings.enumerated() {
-                    polys.append(["id": "\(sim.id)-\(i)", "kind": "sim", "target": false, "coords": ring.flatMap { [$0.longitude, $0.latitude] }])
-                }
-            }
-        }
         var sel: [String: Any] = [:]
         if let e = selected { sel = ["lat": e.lat, "lon": e.lon, "title": e.title, "kind": e.kind.rawValue] }
         let track = trackPayload()
-        let passToken = s.layers.contains(.simulation) ? (s.simulationRevision % 10_000) : Int((s.lastUpdate?.timeIntervalSince1970 ?? 0) / 15) % 10_000
         let payload: [String: Any] = ["entities": items, "polys": polys, "selected": sel, "track": track,
                                       "counts": ["ac": s.contacts.count + s.militaryContacts.count, "sh": s.ships.count, "sat": s.satellites.count, "cam": s.cameras.count],
-                                      "orb": s.satellites.count, "pass": passToken]
+                                      "orb": s.satellites.count, "pass": Int(Date().timeIntervalSince1970 / 90) % 10000]
         guard let d = try? JSONSerialization.data(withJSONObject: payload), let js = String(data: d, encoding: .utf8) else { return }
-        if !force, js == lastEntityPayload { return }
-        lastEntityPayload = js
         bridge.eval("GE.setData(\(js))")
     }
 
@@ -511,10 +427,9 @@ struct Scene3DView: View {
         guard let te = s.trackedEntity, let tc = s.trackedCoord else { return [:] }
         let c = (s.contacts + s.militaryContacts).first { "ac-\($0.id)" == te.id }
         let v = s.ships.values.first { "sh-\($0.id)" == te.id }
-        let sim = s.simulationContacts.first { "sim-\($0.id)" == te.id }
-        return ["id": te.id, "lat": tc.latitude, "lon": tc.longitude, "alt": sim?.altM ?? Double(c?.altFt ?? 0) * 0.3048,
-                "heading": sim?.heading ?? c?.track ?? v?.cog ?? 0, "spd": sim?.speedKt ?? c?.groundSpeedKt ?? v?.sogKt ?? 0, "label": te.title, "kind": te.kind.rawValue,
-                "sub": sim?.subtitle ?? [c?.type ?? "", c?.registration ?? "", c?.military == true ? "MILITARY" : ""].filter { !$0.isEmpty }.joined(separator: " · "),
+        return ["id": te.id, "lat": tc.latitude, "lon": tc.longitude, "alt": Double(c?.altFt ?? 0) * 0.3048,
+                "heading": c?.track ?? v?.cog ?? 0, "spd": c?.groundSpeedKt ?? v?.sogKt ?? 0, "label": te.title, "kind": te.kind.rawValue,
+                "sub": [c?.type ?? "", c?.registration ?? "", c?.military == true ? "MILITARY" : ""].filter { !$0.isEmpty }.joined(separator: " · "),
                 "ts": Date().timeIntervalSince1970,
                 "model": c.map { aircraftModel($0) } ?? v.map { shipModel($0) } ?? "",
                 "trail": s.trail.suffix(200).flatMap { [$0.longitude, $0.latitude] }]
@@ -522,17 +437,9 @@ struct Scene3DView: View {
 
     /// 1 Hz: only the tracked target — the page dead-reckons between these at frame rate.
     private func pushTrack() {
-        guard ready else { return }
-        guard s.isTracking else {
-            guard !lastTrackPayload.isEmpty else { return }
-            lastTrackPayload = ""
-            bridge.eval("GE.setTrack({})")
-            return
-        }
+        guard ready, s.isTracking else { return }
         let tr = trackPayload()
         guard !tr.isEmpty, let d = try? JSONSerialization.data(withJSONObject: tr), let js = String(data: d, encoding: .utf8) else { return }
-        if js == lastTrackPayload { return }
-        lastTrackPayload = js
         bridge.eval("GE.setTrack(\(js))")
     }
 
@@ -853,16 +760,12 @@ const SHADERS = {
 const PLANE_GLB = 'data:model/gltf-binary;base64,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';
 const SHIP_GLB = 'data:model/gltf-binary;base64,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';
 window.GE = (() => {
-  let viewer, tileset = null, buildings = null, customAssets = [], stage = null, cfg = {}, hudOn = true, sensor = 'normal', spaceMode = false;
-  let spaceFX = [];
-  let buildingReq = { token: 0, on: false, loading: false };
+  let viewer, tileset = null, buildings = null, customAssets = [], stage = null, cfg = {}, hudOn = true, sensor = 'normal';
   let customTs = new Map(), lastData = null, cockpit = false, camImgs = new Map(), t0 = Date.now();
   const rasterCredit = { esriImagery:'ESRI', esriHybrid:'ESRI', esriStreets:'ESRI', osm:'OSM', google3D:'GOOGLE 3D', bingAerial:'BING', bingHybrid:'BING', custom:'MRZEFV' };
 
   function esri(layer){ return new Cesium.UrlTemplateImageryProvider({ url: 'https://server.arcgisonline.com/ArcGIS/rest/services/'+layer+'/MapServer/tile/{z}/{y}/{x}', maximumLevel: 19, credit: 'Esri, Maxar, Earthstar Geographics' }); }
   function osm(){ return new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/', credit: '© OpenStreetMap contributors' }); }
-  function wantsAnimatedShader(){ return !!(SHADERS[sensor] && sensor !== 'flir'); }
-  function syncRenderMode(){ if (!viewer) return; viewer.scene.requestRenderMode = !(trk || cockpit || wantsAnimatedShader()); viewer.scene.requestRender(); }
 
   // ---- basemaps ----
   async function setBasemap(name){
@@ -914,6 +817,7 @@ window.GE = (() => {
           t.modelMatrix = Cesium.Matrix4.fromTranslation(Cesium.Cartesian3.multiplyByScalar(n, -meta.baseHeight, new Cesium.Cartesian3()));
         }
         if (meta.kind === 'mesh' || meta.kind === 'buildings' || meta.kind === 'trees') t.shadows = viewer.shadows ? Cesium.ShadowMode.ENABLED : Cesium.ShadowMode.DISABLED;
+        if (meta.kind === 'buildings') { t.customShader = buildingShader(); }
         viewer.scene.primitives.add(t); customTs.set(u, t); status('LOADED ' + u.split('/').slice(-3,-1).join('/').toUpperCase());
       } catch(e){ status('TILESET FAILED: ' + (e.message||e)); }
     }
@@ -931,52 +835,38 @@ window.GE = (() => {
   }
   function modelScale(e){ return e.kind === 'ac' ? 1.0 : e.kind === 'sat' ? 40 : 1.0; }
 
-  function clearSpaceFX(){ for (const id of spaceFX) { const e = viewer && viewer.entities.getById(id); if (e) viewer.entities.remove(e); } spaceFX = []; }
-  function seedSpaceFX(){
-    if (!viewer) return;
-    clearSpaceFX();
-    const active = spaceMode;
-    if (!active) return;
-    const stars = [];
-    for (let i = 0; i < 56; i++) {
-      const lat = -72 + (i % 29) * (144 / 28);
-      const lon = ((i * 137.50776405) % 360) - 180;
-      stars.push({ id: `space:star:${i}`, label: `STARFIELD ${i+1}`, icon: '✦', lat, lon, alt: 240000 + (i % 7) * 28000, color: '#c9e8ff', s: i % 9 === 0 ? 0.44 : 0.3 });
-    }
-    const showcase = [
-      { id: 'space:galaxy:1', label: 'SPIRAL GALAXY', icon: '✺', lat: 62.5, lon: -130.3, alt: 420000, color: '#d4b7ff', s: 0.8 },
-      { id: 'space:galaxy:2', label: 'DEEP SKY CLUSTER', icon: '✶', lat: -41.7, lon: 18.4, alt: 465000, color: '#9fd7ff', s: 0.74 },
-      { id: 'space:ufo:1', label: 'UFO SCOUT', icon: '🛸', lat: 38.2, lon: -114.5, alt: 115000, color: '#9dffb2', s: 0.68 },
-      { id: 'space:ufo:2', label: 'UFO SCOUT', icon: '🛸', lat: -11.9, lon: 146.0, alt: 128000, color: '#9dffb2', s: 0.68 },
-      { id: 'space:alien:1', label: 'ALIEN SIGNAL', icon: '👽', lat: 6.8, lon: 74.2, alt: 102000, color: '#ffe680', s: 0.65 }
-    ];
-    for (const it of stars.concat(showcase)) {
-      const sp = sprite(it.label, `${Math.round(it.alt/1000)} KM · DEEP SPACE`, it.color, { icon: it.icon });
-      viewer.entities.add({ id: it.id, position: Cesium.Cartesian3.fromDegrees(it.lon, it.lat, it.alt), billboard: { image: sp, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, scale: it.s, disableDepthTestDistance: Number.POSITIVE_INFINITY, scaleByDistance: new Cesium.NearFarScalar(2000, 1.0, 1500000, 0.38) } });
-      spaceFX.push(it.id);
-    }
+  // ---- building facade shader: glass fresnel reflections + window lights after dark ----
+  let bShader = null;
+  function buildingShader(){
+    if (bShader) return bShader;
+    bShader = new Cesium.CustomShader({
+      lightingModel: Cesium.LightingModel.PBR,
+      uniforms: { u_night: { type: Cesium.UniformType.FLOAT, value: 0.0 }, u_seed: { type: Cesium.UniformType.FLOAT, value: 0.37 } },
+      fragmentShaderText: `
+        float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {
+          vec3 n = normalize(fsInput.attributes.normalEC);
+          vec3 v = normalize(-fsInput.attributes.positionEC);
+          float fres = pow(1.0 - clamp(dot(n, v), 0.0, 1.0), 3.0);
+          float glassy = smoothstep(0.55, 0.85, 1.0 - material.roughness);
+          float up = clamp(n.y * 0.5 + 0.5, 0.0, 1.0);
+          vec3 sky = mix(vec3(0.45, 0.55, 0.70), vec3(0.85, 0.92, 1.0), up) * mix(1.0, 0.25, u_night);
+          material.diffuse = mix(material.diffuse, sky, glassy * (0.30 + 0.55 * fres));
+          material.specular = mix(material.specular, vec3(0.95), glassy * fres * 0.8);
+          material.roughness = mix(material.roughness, 0.08, glassy);
+          // window lights: per-window random switch so blocks don't light uniformly
+          vec2 cell = floor(fsInput.attributes.texCoord_0 * 4.0);
+          float on = step(0.35, hash(cell + u_seed));
+          vec3 lights = material.emissive * on * (0.6 + 0.8 * hash(cell * 1.7 + u_seed));
+          material.emissive = lights * u_night * 2.2;
+        }`
+    });
+    return bShader;
   }
 
   // ---- realism presets ----
   let realism = 'off';
   function localHour(h){ const d = new Date(); const lonH = (viewer ? Cesium.Math.toDegrees(viewer.camera.positionCartographic.longitude) : 0) / 15; d.setUTCHours(Math.round(h - lonH + 24) % 24, 0, 0, 0); return Cesium.JulianDate.fromDate(d); }
-  function applyBuildingStyle(){
-    if (!buildings) return;
-    const glass = realism !== 'off';
-    buildings.style = glass ? new Cesium.Cesium3DTileStyle({
-      color: {
-        conditions: [
-          ["${height} >= 220", "color('#b4d9ff', 0.82)"],
-          ["${height} >= 120", "color('#9ecfff', 0.76)"],
-          ["${height} >= 40", "color('#8fc3ff', 0.68)"],
-          ["true", "color('#7bb7ff', 0.58)"]
-        ]
-      }
-    }) : undefined;
-    buildings.maximumScreenSpaceError = glass ? 3 : 8;
-    buildings.imageBasedLightingFactor = glass ? new Cesium.Cartesian2(1.35, 1.05) : new Cesium.Cartesian2(1.0, 1.0);
-    buildings.shadows = viewer.shadows ? Cesium.ShadowMode.ENABLED : Cesium.ShadowMode.DISABLED;
-  }
   function setRealism(name){
     realism = name || 'off'; if (!viewer) return;
     const sc = viewer.scene, g = sc.globe;
@@ -998,10 +888,9 @@ window.GE = (() => {
       case 'overcast': viewer.clock.currentTime = localHour(11); sc.light.intensity = 1.1; sc.skyAtmosphere.saturationShift = -0.6; sc.skyAtmosphere.brightnessShift = -0.25; break;
       default: sc.light.intensity = 2.0; g.enableLighting = false; sc.fog.enabled = false;
     }
-    applyBuildingStyle();
-    seedSpaceFX();
     viewer.clock.shouldAnimate = false;
-    syncRenderMode();
+    if (bShader) bShader.setUniform('u_night', realism === 'night' ? 1.0 : realism === 'golden' ? 0.55 : realism === 'overcast' ? 0.25 : 0.0);
+    sc.requestRenderMode = !on && !(SHADERS[sensor] && sensor !== 'flir') && !trk;
     status('REALISM ' + realism.toUpperCase());
     sc.requestRender();
   }
@@ -1013,40 +902,10 @@ window.GE = (() => {
   }
   async function setBuildings(on){
     if (!viewer) return;
-    const want = !!on;
-    if (!want) {
-      buildingReq.token++;
-      buildingReq.on = false;
-      buildingReq.loading = false;
-      if (buildings) { viewer.scene.primitives.remove(buildings); buildings = null; }
-      viewer.scene.requestRender();
-      return;
-    }
-    if (buildingReq.on && (buildingReq.loading || buildings)) return;
-    const req = ++buildingReq.token;
-    buildingReq.on = true;
-    buildingReq.loading = true;
     if (buildings) { viewer.scene.primitives.remove(buildings); buildings = null; }
-    if (!TOKEN) {
-      buildingReq.loading = false;
-      viewer.scene.requestRender();
-      return;
-    }
-    try {
-      const next = await Cesium.createOsmBuildingsAsync();
-      if (req !== buildingReq.token || !buildingReq.on) { if (next && typeof next.destroy === 'function') next.destroy(); return; }
-      buildingReq.loading = false;
-      buildings = next;
-      viewer.scene.primitives.add(buildings);
-      applyBuildingStyle();
-    } catch(e){
-      if (req !== buildingReq.token || !buildingReq.on) return;
-      buildingReq.loading = false;
-      status('OSM BUILDINGS: ' + (e.message||e));
-    }
+    if (on && TOKEN) { try { buildings = await Cesium.createOsmBuildingsAsync(); viewer.scene.primitives.add(buildings); } catch(e){ status('OSM BUILDINGS: ' + (e.message||e)); } }
     viewer.scene.requestRender();
   }
-  function setSpaceMode(on){ spaceMode = !!on; if (!viewer) return; seedSpaceFX(); viewer.scene.requestRender(); }
   async function loadAssets(ids){
     for (const p of customAssets) viewer.scene.primitives.remove(p);
     customAssets = [];
@@ -1065,7 +924,8 @@ window.GE = (() => {
       stage = new Cesium.PostProcessStage({ fragmentShader: SHADERS[sensor], uniforms: { t: () => (Date.now()-t0)/1000 } });
       viewer.scene.postProcessStages.add(stage);
     }
-    syncRenderMode();
+    viewer.scene.requestRenderMode = !SHADERS[sensor] || sensor === 'flir';   // animated shaders need continuous render
+    viewer.scene.requestRender();
   }
   function setHUD(on){ hudOn = !!on; $('hud').classList.toggle('off', !hudOn); }
   function status(t){ $('stat').textContent = t; post({type:'status', text: t}); }
@@ -1085,7 +945,7 @@ window.GE = (() => {
     viewer.scene.postProcessStages.fxaa.enabled = true;
     viewer.scene.skyAtmosphere.show = true;
     setBasemap(cfg.basemap || 'esriImagery'); setTerrain(!!cfg.terrain); setBuildings(!!cfg.buildings); loadAssets(cfg.assets);
-    setSensor(cfg.sensor || 'normal'); setHUD(cfg.hud !== false); setRealism(cfg.realism || 'off'); setSpaceMode(!!cfg.space);
+    setSensor(cfg.sensor || 'normal'); setHUD(cfg.hud !== false); setRealism(cfg.realism || 'off');
     bindCtx();
     $('kh').textContent = String(4000 + Math.floor(Math.random()*999)); $('ops').textContent = String(4100 + Math.floor(Math.random()*99));
 
@@ -1236,7 +1096,8 @@ window.GE = (() => {
     if (tileset) tileset.shadows = on ? Cesium.ShadowMode.ENABLED : Cesium.ShadowMode.DISABLED;
     for (const t of customTs.values()) t.shadows = on ? Cesium.ShadowMode.ENABLED : Cesium.ShadowMode.DISABLED;
     if (on) { const d = new Date(); d.setUTCHours(Math.floor(hourZ||12), Math.round(((hourZ||12)%1)*60), 0, 0); viewer.clock.currentTime = Cesium.JulianDate.fromDate(d); viewer.clock.shouldAnimate = false; }
-    syncRenderMode();
+    viewer.scene.requestRenderMode = !on && !(SHADERS[sensor] && sensor !== 'flir');
+    viewer.scene.requestRender();
   }
 
   // ---- live track: dead-reckon at frame rate, optional camera follow ----
@@ -1244,11 +1105,11 @@ window.GE = (() => {
   function setFollow(on){ follow = !!on; followHPR = null; if (!follow && viewer) viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY); status(follow ? 'FOLLOW ON · DRAG TO ORBIT TARGET' : 'FOLLOW OFF'); }
   function setTrack(t){
     if (!viewer) return;
-    if (!t || !t.id) { trk = null; if (lastData) lastData.track = {}; viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY); syncRenderMode(); return; }
+    if (!t || !t.id) { trk = null; if (lastData) lastData.track = {}; viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY); viewer.scene.requestRenderMode = !(SHADERS[sensor] && sensor !== 'flir'); return; }
     if (!trk || trk.id !== t.id) { followHPR = null; }
     trk = Object.assign({}, t, { t0: performance.now(), lat0: t.lat, lon0: t.lon });
     if (lastData) lastData.track = t;
-    syncRenderMode();
+    viewer.scene.requestRenderMode = false;   // continuous render while tracking
   }
   function trkPos(){
     if (!trk) return null;
@@ -1299,7 +1160,6 @@ window.GE = (() => {
     $('cross').style.display = cockpit ? 'none' : '';
     viewer.scene.screenSpaceCameraController.enableInputs = !cockpit;
     if (cockpit) cockpitTick(); else { viewer.trackedEntity = undefined; viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY); followHPR = null; }
-    syncRenderMode();
     post({type:'cockpit', on: cockpit});
   }
   function cockpitTick(){
@@ -1365,8 +1225,8 @@ window.GE = (() => {
   }
 
   // ---- data ----
-  const colors = { ac:'#4de3ff', mil:'#ffa63d', sh:'#5aa9ff', cam:'#c77dff', eq:'#ff6a3d', fire:'#ff3b30', sat:'#9ad7ff', train:'#ffd166', apt:'#8ecae6', infra:'#2ec4b6', storm:'#c77dff', sim:'#9dffb2' };
-  const icons = { ac:'✈', sh:'⛴', cam:'▣', eq:'◎', fire:'▲', sat:'✦', train:'▬', apt:'⊕', infra:'▦', storm:'≋', sim:'🛸' };
+  const colors = { ac:'#4de3ff', mil:'#ffa63d', sh:'#5aa9ff', cam:'#c77dff', eq:'#ff6a3d', fire:'#ff3b30', sat:'#9ad7ff', train:'#ffd166', apt:'#8ecae6', infra:'#2ec4b6', storm:'#c77dff' };
+  const icons = { ac:'✈', sh:'⛴', cam:'▣', eq:'◎', fire:'▲', sat:'✦', train:'▬', apt:'⊕', infra:'▦', storm:'≋' };
   function setData(d){
     if (!viewer) return;
     lastData = d;
@@ -1381,7 +1241,7 @@ window.GE = (() => {
       const cc = Cesium.Color.fromCssColorString(col);
       let ent = viewer.entities.getById(id);
       const isCam = e.kind === 'cam';
-      const img = boxed ? (isCam && camH < 8000 ? (camImgs.get(e.id) || sprite(e.label, e.sub, col, { icon: '▣' })) : sprite(e.label, e.sub, col, { icon: e.icon || icons[e.kind] || '▣' })) : null;
+      const img = boxed ? (isCam && camH < 8000 ? (camImgs.get(e.id) || sprite(e.label, e.sub, col, { icon: '▣' })) : sprite(e.label, e.sub, col, { icon: icons[e.kind] || '▣' })) : null;
       if (isCam && camH < 8000 && !camImgs.has(e.id)) { camImgs.set(e.id, null); camCard(e.img, e.label).then(cv => { camImgs.set(e.id, cv); const en = viewer.entities.getById(id); if (en && en.billboard) { en.billboard.image = cv; viewer.scene.requestRender(); } }); }
       const mUri = modelUri(e);
       const useModel = boxed && !!mUri && (camH < 30000 && (e.kind === 'ac' || e.kind === 'sh') || camH < 8000 && ['train','cam','infra'].includes(e.kind) || e.kind === 'sat' && camH > 200000);
@@ -1399,10 +1259,10 @@ window.GE = (() => {
       const id = 'p:' + p.id + ':' + p.coords.length; keep.add(id);
       if (viewer.entities.getById(id)) continue;
       const arr = Cesium.Cartesian3.fromDegreesArray(p.coords);
-      const col = p.kind === 'fp' ? Cesium.Color.CYAN : p.kind === 'region' ? Cesium.Color.WHITE : p.kind === 'hazard' ? Cesium.Color.fromCssColorString('#ff6a3d') : p.kind === 'sim' ? Cesium.Color.fromCssColorString('#9dffb2') : Cesium.Color.YELLOW;
+      const col = p.kind === 'fp' ? Cesium.Color.CYAN : p.kind === 'region' ? Cesium.Color.WHITE : p.kind === 'hazard' ? Cesium.Color.fromCssColorString('#ff6a3d') : Cesium.Color.YELLOW;
       viewer.entities.add({ id,
-        polygon: p.kind === 'region' ? undefined : { hierarchy: new Cesium.PolygonHierarchy(arr), material: col.withAlpha(p.kind==='fp' ? 0.10 : p.kind==='hazard' ? 0.15 : p.kind==='sim' ? 0.10 : (p.target ? 0.18 : 0.04)), classificationType: Cesium.ClassificationType.BOTH },
-        polyline: { positions: arr.concat([arr[0]]), width: p.kind==='fp' ? 1.5 : p.kind==='sim' ? 1.8 : (p.target ? 3 : (p.kind==='region' ? 2 : 1)), material: col.withAlpha(p.kind==='region' ? 0.9 : (p.target ? 1 : 0.6)), clampToGround: true } });
+        polygon: p.kind === 'region' ? undefined : { hierarchy: new Cesium.PolygonHierarchy(arr), material: col.withAlpha(p.kind==='fp' ? 0.10 : p.kind==='hazard' ? 0.15 : (p.target ? 0.18 : 0.04)), classificationType: Cesium.ClassificationType.BOTH },
+        polyline: { positions: arr.concat([arr[0]]), width: p.kind==='fp' ? 1.5 : (p.target ? 3 : (p.kind==='region' ? 2 : 1)), material: col.withAlpha(p.kind==='region' ? 0.9 : (p.target ? 1 : 0.6)), clampToGround: true } });
     }
     if (d.selected && d.selected.lat !== undefined) {
       keep.add('sel');
@@ -1448,7 +1308,7 @@ window.GE = (() => {
     viewer.scene.requestRender();
   }
 
-  return { init, setBasemap, setTerrain, setBuildings, loadAssets, setView, setData, home, tilt, setCustomRaster, setCustomTilesets, setSensor, setHUD, setCockpit, setTool, clearTools, setShadows, focus, setTrack, setFollow, setModels, setRealism, setSpaceMode };
+  return { init, setBasemap, setTerrain, setBuildings, loadAssets, setView, setData, home, tilt, setCustomRaster, setCustomTilesets, setSensor, setHUD, setCockpit, setTool, clearTools, setShadows, focus, setTrack, setFollow, setModels, setRealism };
 })();
 window.addEventListener('load', () => post({type:'ready'}));
 window.addEventListener('error', (e) => post({type:'status', text: 'JS: ' + e.message}));

@@ -88,7 +88,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install deps
-        run: pip install trimesh shapely numpy requests mapbox-earcut
+        run: pip install trimesh shapely numpy requests mapbox-earcut pillow
       - name: Build OSM buildings 3D Tiles
         run: python3 scripts/buildings.py --name "${{ inputs.name }}" --lat ${{ inputs.lat }} --lon ${{ inputs.lon }} --radius-km ${{ inputs.radius_km }}
       - uses: actions/upload-artifact@v4
