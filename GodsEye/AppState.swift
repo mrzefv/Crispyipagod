@@ -693,13 +693,10 @@ final class AppState: ObservableObject {
         return ranked
     }
 
-    private func simulationPoint(around c: CLLocationCoordinate2D, radius: Double, bearing: Double) -> CLLocationCoordinate2D {
-        c.moved(meters: radius, bearing: bearing)
-    }
-
-    private func simulationHeading(around c: CLLocationCoordinate2D, radius: Double, bearing: Double, step: Double = 12) -> Double {
-        Geo.bearing(from: simulationPoint(around: c, radius: radius, bearing: bearing),
-                    to: simulationPoint(around: c, radius: radius, bearing: bearing + step))
+    private func simulationOrbit(around c: CLLocationCoordinate2D, radius: Double, bearing: Double, step: Double = 12) -> (coord: CLLocationCoordinate2D, heading: Double) {
+        let coord = c.moved(meters: radius, bearing: bearing)
+        let next = c.moved(meters: radius, bearing: bearing + step)
+        return (coord, Geo.bearing(from: coord, to: next))
     }
 
     private func circleRing(center: CLLocationCoordinate2D, radius: Double, points: Int = 36) -> [CLLocationCoordinate2D] {
@@ -710,18 +707,18 @@ final class AppState: ObservableObject {
         guard layers.contains(.simulation), let anchor = simulationAnchor else { return [] }
         let phase = simulationTick
         let orbit = min(max(distance * 0.07, 1_800), 12_000)
-        let cropCenter = simulationPoint(around: anchor, radius: orbit * 0.52, bearing: 210)
+        let cropCenter = anchor.moved(meters: orbit * 0.52, bearing: 210)
         let cropBearing = Double(phase) * 32
-        let cropUFO = simulationPoint(around: cropCenter, radius: orbit * 0.34, bearing: cropBearing)
+        let cropUFO = simulationOrbit(around: cropCenter, radius: orbit * 0.34, bearing: cropBearing)
         let dejaBearing = 30 + sin(Double(phase) * 0.55) * 130
-        let deja = simulationPoint(around: anchor, radius: orbit * 0.82, bearing: dejaBearing)
-        let beamBase = simulationPoint(around: anchor, radius: orbit * 0.3, bearing: 320 + cos(Double(phase) * 0.45) * 24)
+        let deja = simulationOrbit(around: anchor, radius: orbit * 0.82, bearing: dejaBearing)
+        let beamBase = anchor.moved(meters: orbit * 0.3, bearing: 320 + cos(Double(phase) * 0.45) * 24)
         let beamBearing = 80 + Double(phase) * 22
-        let beam = simulationPoint(around: beamBase, radius: orbit * 0.22, bearing: beamBearing)
+        let beam = simulationOrbit(around: beamBase, radius: orbit * 0.22, bearing: beamBearing)
         return [
-            SimulationContact(id: "crop-run", kind: .ufo, title: "UFO CROP RUN", subtitle: "fictional · tracing circles", summary: "Looping low over the field and redrawing the crop-circle pattern.", lat: cropUFO.latitude, lon: cropUFO.longitude, altM: max(280, orbit * 0.24), heading: simulationHeading(around: cropCenter, radius: orbit * 0.34, bearing: cropBearing), phase: phase),
-            SimulationContact(id: "deja-vu", kind: .dejaVu, title: "DÉJÀ VU LOOP", subtitle: "fictional · repeating path", summary: "A repeating route that intentionally doubles back to create a déjà vu effect.", lat: deja.latitude, lon: deja.longitude, altM: max(420, orbit * 0.3), heading: simulationHeading(around: anchor, radius: orbit * 0.82, bearing: dejaBearing), phase: phase % 12),
-            SimulationContact(id: "abduction", kind: .abduction, title: "ABDUCTION FLYOVER", subtitle: "fictional · beam sweep", summary: "A scripted flyover with a moving beam marker near the surface.", lat: beam.latitude, lon: beam.longitude, altM: max(550, orbit * 0.4), heading: simulationHeading(around: beamBase, radius: orbit * 0.22, bearing: beamBearing), phase: phase % 10),
+            SimulationContact(id: "crop-run", kind: .ufo, title: "UFO CROP RUN", subtitle: "fictional · tracing circles", summary: "Looping low over the field and redrawing the crop-circle pattern.", lat: cropUFO.coord.latitude, lon: cropUFO.coord.longitude, altM: max(280, orbit * 0.24), heading: cropUFO.heading, phase: phase),
+            SimulationContact(id: "deja-vu", kind: .dejaVu, title: "DÉJÀ VU LOOP", subtitle: "fictional · repeating path", summary: "A repeating route that intentionally doubles back to create a déjà vu effect.", lat: deja.coord.latitude, lon: deja.coord.longitude, altM: max(420, orbit * 0.3), heading: deja.heading, phase: phase % 12),
+            SimulationContact(id: "abduction", kind: .abduction, title: "ABDUCTION FLYOVER", subtitle: "fictional · beam sweep", summary: "A scripted flyover with a moving beam marker near the surface.", lat: beam.coord.latitude, lon: beam.coord.longitude, altM: max(550, orbit * 0.4), heading: beam.heading, phase: phase % 10),
             SimulationContact(id: "crop-circle", kind: .cropCircle, title: "CROP CIRCLE", subtitle: "fictional · ground imprint", summary: "A static ground marker that the nearby UFO orbit keeps revisiting.", lat: cropCenter.latitude, lon: cropCenter.longitude, altM: 0, heading: 0, phase: phase % 6)
         ]
     }
@@ -729,8 +726,8 @@ final class AppState: ObservableObject {
     var simulationOverlays: [SimulationOverlay] {
         guard layers.contains(.simulation), let anchor = simulationAnchor else { return [] }
         let orbit = min(max(distance * 0.07, 1_800), 12_000)
-        let cropCenter = simulationPoint(around: anchor, radius: orbit * 0.52, bearing: 210)
-        let beamBase = simulationPoint(around: anchor, radius: orbit * 0.3, bearing: 320 + cos(Double(simulationTick) * 0.45) * 24)
+        let cropCenter = anchor.moved(meters: orbit * 0.52, bearing: 210)
+        let beamBase = anchor.moved(meters: orbit * 0.3, bearing: 320 + cos(Double(simulationTick) * 0.45) * 24)
         let corridor = Geo.cone(at: beamBase, heading: 35 + sin(Double(simulationTick) * 0.3) * 18, fov: 26, range: orbit * 0.42)
         return [
             SimulationOverlay(id: "crop-rings", kind: .cropCircle, title: "Crop circles", rings: [

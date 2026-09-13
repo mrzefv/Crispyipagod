@@ -103,6 +103,7 @@ struct Scene3DView: View {
     @State private var shadows = false
     @State private var shadowHour: Double = 14
     @State private var lastEntityPayload = ""
+    @State private var lastEntityRevision = ""
     @State private var lastTrackPayload = ""
 
     var body: some View {
@@ -129,6 +130,10 @@ struct Scene3DView: View {
         .onChange(of: s.layers.contains(.space)) { _, on in
             guard ready else { return }
             bridge.eval("GE.setSpaceMode(\(jsBool(on)))")
+        }
+        .onChange(of: s.layers.contains(.simulation)) { _, _ in
+            guard ready else { return }
+            pushEntities(force: true)
         }
         .onChange(of: s.simulationTick) { _, _ in
             guard ready, s.layers.contains(.simulation) else { return }
@@ -363,6 +368,23 @@ struct Scene3DView: View {
 
     private func pushEntities(force: Bool = false) {
         guard ready else { return }
+        let entityRevision = [
+            "dense:\(dense)",
+            "scene:\(s.sceneEntities)",
+            "lines:\(s.sceneLines)",
+            "sel:\(selected?.id ?? "-")",
+            "track:\(s.trackedID ?? "-")",
+            "ac:\(s.visibleContacts.prefix(dense ? 500 : 320).map(\.id).joined(separator: ","))",
+            "sh:\(s.visibleShips.prefix(dense ? 320 : 220).map(\.id).joined(separator: ","))",
+            "sat:\(s.visibleSatellites.prefix(300).map(\.id).joined(separator: ","))",
+            "cam:\(s.visibleCameras.prefix(300).map(\.id).joined(separator: ","))",
+            "haz:\(s.visibleHazards.prefix(60).map(\.id).joined(separator: ","))",
+            "sim:\(s.layers.contains(.simulation) ? "\(s.simulationTick):\(s.simulationRevision)" : "off")",
+            "props:\(s.propertyLines.count)",
+            "regions:\(s.regions.count)"
+        ].joined(separator: "|")
+        if !force, entityRevision == lastEntityRevision { return }
+        lastEntityRevision = entityRevision
         var items: [[String: Any]] = []
         if s.sceneEntities {
             let baseContacts = s.visibleContacts
