@@ -124,7 +124,10 @@ struct Scene3DView: View {
         .onChange(of: s.sceneEntities) { _, _ in pushEntities() }
         .onChange(of: s.sceneLines) { _, _ in pushEntities() }
         .onChange(of: s.propertyLines) { _, _ in pushEntities() }
-        .onChange(of: s.layers.contains(.space)) { _, on in bridge.eval("GE.setSpaceMode(\(on))") }
+        .onChange(of: s.layers.contains(.space)) { _, on in
+            guard ready else { return }
+            bridge.eval("GE.setSpaceMode(\(on))")
+        }
         .onChange(of: s.trackedID) { _, _ in pushEntities() }
         .onChange(of: selected) { _, _ in pushEntities() }
         .onDisappear { pushTimer?.invalidate(); pushTimer = nil; trackTimer?.invalidate(); trackTimer = nil }
@@ -929,7 +932,10 @@ window.GE = (() => {
         buildings = next;
         viewer.scene.primitives.add(buildings);
         applyBuildingStyle();
-      } catch(e){ status('OSM BUILDINGS: ' + (e.message||e)); }
+      } catch(e){
+        if (req !== buildingReq.token || !buildingReq.on) return;
+        status('OSM BUILDINGS: ' + (e.message||e));
+      }
     }
     viewer.scene.requestRender();
   }
