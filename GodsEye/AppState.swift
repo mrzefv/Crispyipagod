@@ -635,6 +635,7 @@ final class AppState: ObservableObject {
         simulationAnchor = nil
         simulationTick = 0
         simulationRevision &+= 1
+        rebuildDisplay()
     }
 
     private func refreshSelectedSimulation() {
@@ -1273,7 +1274,19 @@ final class AppState: ObservableObject {
 
     /// Dead-reckon the tracked aircraft between polls; snap on new fixes.
     private func trackTick(fromPoll: Bool) {
-        guard let tid = trackedID, tid.hasPrefix("ac-") else { return }
+        guard let tid = trackedID else { return }
+        if tid.hasPrefix("sim-") {
+            guard let sim = simulationContacts.first(where: { "sim-\($0.id)" == tid }) else { return }
+            trackedEntity = Entity.from(sim)
+            trackedHeading = sim.heading
+            trackedCoord = sim.coord
+            trail.append(sim.coord)
+            if trail.count > 120 { trail.removeFirst(trail.count - 120) }
+            followCamera(animated: true, duration: 0.8)
+            if let te = trackedEntity { LiveActivityManager.shared.update(te, coord: sim.coord) }
+            return
+        }
+        guard tid.hasPrefix("ac-") else { return }
         if fromPoll {
             guard let c = (contacts + militaryContacts).first(where: { "ac-\($0.id)" == tid }) else { return }
             lastTrackedFix = (c.coord, c.seenAt, c.groundSpeedKt ?? 0, c.track)

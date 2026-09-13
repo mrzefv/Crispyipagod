@@ -992,7 +992,7 @@ struct Entity: Identifiable, Equatable {
             case .simulation: return Color(red: 0.65, green: 1.0, blue: 0.7)
             }
         }
-        var trackable: Bool { self == .aircraft || self == .military || self == .ship || self == .satellite || self == .train || self == .storm }
+        var trackable: Bool { self == .aircraft || self == .military || self == .ship || self == .satellite || self == .train || self == .storm || self == .simulation }
     }
 
     let id: String
