@@ -840,7 +840,7 @@ window.GE = (() => {
   function seedSpaceFX(){
     if (!viewer) return;
     clearSpaceFX();
-    const active = spaceMode || realism === 'night';
+    const active = spaceMode;
     if (!active) return;
     const stars = [];
     for (let i = 0; i < 56; i++) {
