@@ -203,7 +203,7 @@ enum ObjLoader {
     }
 
     static func node(from groups: [Group], style: ObjStyle, base: URL, tile: String, ground: GroundGrid?, cache: inout [String: SCNMaterial]) async -> SCNNode {
-        let tile = SCNNode()
+        let node = SCNNode()
         // merge groups per object name so a building/tree is one node that can be dropped onto terrain
         var byObject: [String: [Group]] = [:]; var order: [String] = []
         for g in groups { let key = g.name.split(separator: "_").first.map(String.init) ?? g.name; if byObject[key] == nil { order.append(key) }; byObject[key, default: []].append(g) }
@@ -222,9 +222,9 @@ enum ObjLoader {
             if let ground, style != .ortho, minX < maxX {
                 objNode.position.y = Float(ground.height(x: Double((minX + maxX) / 2), y: Double(-(minZ + maxZ) / 2)))
             }
-            tile.addChildNode(objNode)
+            node.addChildNode(objNode)
         }
-        return tile
+        return node
     }
 
     /// Mesh tiles: named m_i_j, indices from west / from north.

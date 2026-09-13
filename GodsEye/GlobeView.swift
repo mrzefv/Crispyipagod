@@ -1325,6 +1325,7 @@ struct LayersSheet: View {
         case .scanner: return "\(s.scanners.count) feeds"
         case .peaks: return s.peaks.isEmpty ? "zoom in (<300 km)" : "\(s.peaks.count) peaks"
         case .residential: return s.distance >= 6_000 ? "zoom in (<6 km)" : "\(s.residential.count) footprints"
+        case .simulation: return "simulation mode"
         }
     }
 }
