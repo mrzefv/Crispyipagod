@@ -134,6 +134,10 @@ struct Scene3DView: View {
             guard ready, s.layers.contains(.simulation) else { return }
             pushEntities(force: true)
         }
+        .onChange(of: s.simulationRevision) { _, _ in
+            guard ready, s.layers.contains(.simulation) else { return }
+            pushEntities(force: true)
+        }
         .onChange(of: ready) { _, isReady in
             guard isReady else { return }
             bridge.eval("GE.setSpaceMode(\(jsBool(s.layers.contains(.space))))")
@@ -360,14 +364,14 @@ struct Scene3DView: View {
         guard ready else { return }
         var items: [[String: Any]] = []
         if s.sceneEntities {
-            let acs = dense ? (s.contacts + s.militaryContacts) : s.visibleContacts
-            for c in acs.prefix(dense ? 3000 : 500) {
+            let acs = s.visibleContacts
+            for c in acs.prefix(dense ? 500 : 320) {
                 items.append(["id": "ac-\(c.id)", "kind": "ac", "lat": c.lat, "lon": c.lon, "alt": Double(c.altFt ?? 0) * 0.3048,
                               "label": c.displayName, "heading": c.track, "mil": c.military, "spd": c.groundSpeedKt ?? 0, "model": aircraftModel(c),
                               "sub": [c.type ?? "", c.registration ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")])
             }
-            let shs = dense ? Array(s.ships.values) : s.visibleShips
-            for v in shs.prefix(dense ? 1600 : 320) {
+            let shs = s.visibleShips
+            for v in shs.prefix(dense ? 320 : 220) {
                 items.append(["id": "sh-\(v.id)", "kind": "sh", "lat": v.lat, "lon": v.lon, "alt": 0, "label": v.displayName, "heading": v.cog, "mil": false, "spd": v.sogKt, "sub": "MMSI \(v.id)", "model": shipModel(v)])
             }
             for q in s.visibleQuakes.prefix(400) {

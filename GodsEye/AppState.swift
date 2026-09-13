@@ -102,6 +102,7 @@ final class AppState: ObservableObject {
     @Published var night: [CLLocationCoordinate2D] = []
     @Published var storms: [StormCell] = []
     @Published var simulationTick = 0
+    @Published var simulationRevision = 0
     @Published var showRadar = false
     @Published var showStation: WxStation?
     @Published var showProfile = false
@@ -616,7 +617,7 @@ final class AppState: ObservableObject {
                 await MainActor.run {
                     self.simulationTick &+= 1
                     if Date().timeIntervalSince(self.lastSimulationAnchorAt) > 12 {
-                        if self.updateSimulationAnchor() { self.simulationTick &+= 1 }
+                        if self.updateSimulationAnchor() { self.simulationRevision &+= 1 }
                     }
                 }
             }
@@ -628,6 +629,7 @@ final class AppState: ObservableObject {
         simulationTask = nil
         simulationAnchor = nil
         simulationTick = 0
+        simulationRevision = 0
         if selected?.kind == .simulation { selected = nil }
     }
 
@@ -1012,7 +1014,7 @@ final class AppState: ObservableObject {
         if layers.contains(.ships), ais.needsResubscribe(for: center) { connectAIS() }
         if userMoved && orbiting { stopOrbit() }
         if userMoved && scenePlaying { stopScene() }
-        if layers.contains(.simulation), updateSimulationAnchor(thresholdScale: 0.18) { simulationTick &+= 1 }
+        if layers.contains(.simulation), updateSimulationAnchor(thresholdScale: 0.18) { simulationRevision &+= 1 }
         let moved = lastRegionFetch.map { $0.center.distance(to: center) > max(distance * 0.5, 5_000) || Date().timeIntervalSince($0.at) > 120 } ?? true
         if moved {
             lastRegionFetch = (center, Date())
