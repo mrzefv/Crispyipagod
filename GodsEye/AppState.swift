@@ -617,7 +617,10 @@ final class AppState: ObservableObject {
                 await MainActor.run {
                     self.simulationTick &+= 1
                     if Date().timeIntervalSince(self.lastSimulationAnchorAt) > 12 {
-                        if self.updateSimulationAnchor() { self.simulationRevision &+= 1 }
+                        if self.updateSimulationAnchor() {
+                            self.simulationRevision &+= 1
+                            self.refreshSelectedSimulation()
+                        }
                     }
                 }
             }
@@ -632,6 +635,13 @@ final class AppState: ObservableObject {
         simulationAnchor = nil
         simulationTick = 0
         simulationRevision &+= 1
+    }
+
+    private func refreshSelectedSimulation() {
+        guard let id = selected?.id, id.hasPrefix("sim-") else { return }
+        if let sim = simulationContacts.first(where: { "sim-\($0.id)" == id }) {
+            selected = Entity.from(sim)
+        }
     }
 
     func listen(_ f: ScannerFeed) {
@@ -1015,7 +1025,10 @@ final class AppState: ObservableObject {
         if layers.contains(.ships), ais.needsResubscribe(for: center) { connectAIS() }
         if userMoved && orbiting { stopOrbit() }
         if userMoved && scenePlaying { stopScene() }
-        if layers.contains(.simulation), updateSimulationAnchor(thresholdScale: 0.18) { simulationRevision &+= 1 }
+        if layers.contains(.simulation), updateSimulationAnchor(thresholdScale: 0.18) {
+            simulationRevision &+= 1
+            refreshSelectedSimulation()
+        }
         let moved = lastRegionFetch.map { $0.center.distance(to: center) > max(distance * 0.5, 5_000) || Date().timeIntervalSince($0.at) > 120 } ?? true
         if moved {
             lastRegionFetch = (center, Date())

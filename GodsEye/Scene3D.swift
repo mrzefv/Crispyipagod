@@ -144,6 +144,7 @@ struct Scene3DView: View {
         }
         .onChange(of: s.trackedID) { _, _ in
             pushEntities(force: true)
+            lastTrackPayload = ""
             pushTrack()
         }
         .onChange(of: selected) { _, _ in pushEntities(force: true) }
