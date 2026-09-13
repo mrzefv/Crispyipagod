@@ -33,11 +33,11 @@ enum Basemap: String, CaseIterable, Identifiable, Codable {
 enum CesiumConfig {
     static let cesiumVersion = "1.122"
     /// Fallback ion token so nothing breaks if Settings is empty. Paste yours in Settings → 3D Scene.
-    static let defaultIonToken = ""
+    static var defaultIonToken: String { BundledKeys.cesiumIon }
     static let googleTilesAsset = 2275207      // Google Photorealistic 3D Tiles via ion
     static let osmBuildingsAsset = 96188       // Cesium OSM Buildings
     /// Fallback Google Map Tiles API key (Photorealistic 3D without ion). Settings → 3D Scene overrides.
-    static let defaultGoogleKey = ""
+    static var defaultGoogleKey: String { BundledKeys.googleMapTiles }
 }
 
 enum SceneTool: String, CaseIterable, Identifiable {
@@ -67,9 +67,10 @@ enum SceneTool: String, CaseIterable, Identifiable {
 
 struct TilesCatalog: Decodable, Equatable {
     struct Raster: Decodable, Equatable, Identifiable { let id: String; let name: String; let url: String; let minZoom: Int; let maxZoom: Int; let bbox: [Double]; let credit: String? }
-    struct Tileset: Decodable, Equatable, Identifiable { let id: String; let name: String; let url: String; let bbox: [Double]; let credit: String? }
+    struct Tileset: Decodable, Equatable, Identifiable { let id: String; let name: String; let url: String; let bbox: [Double]; let credit: String?; let baseHeight: Double?; let kind: String? }
     var rasters: [Raster] = []
     var tilesets: [Tileset] = []
+    var models: String? = nil
 
     static func load(_ url: String) async -> TilesCatalog? {
         guard let u = URL(string: url), !url.isEmpty else { return nil }
@@ -90,12 +91,15 @@ struct Scene3DView: View {
     @State private var lastCam: (lat: Double, lon: Double, h: Double, heading: Double, pitch: Double)?
     @State private var bridge = CesiumBridge()
     @State private var pushTimer: Timer?
+    @State private var trackTimer: Timer?
+    @State private var follow = true
     @State private var catalog = TilesCatalog()
     @State private var customRaster: String? = nil
     @State private var cockpit = false
     @State private var dense = false
     @State private var chromeHidden = false
     @State private var tool: SceneTool = .none
+    private let realismPresets: [(String, String, String)] = [("off", "Flat", "sun.min"), ("day", "Day", "sun.max.fill"), ("golden", "Golden", "sunset.fill"), ("night", "Night", "moon.stars.fill"), ("overcast", "Overcast", "cloud.fill")]
     @State private var shadows = false
     @State private var shadowHour: Double = 14
 
@@ -122,7 +126,7 @@ struct Scene3DView: View {
         .onChange(of: s.propertyLines) { _, _ in pushEntities() }
         .onChange(of: s.trackedID) { _, _ in pushEntities() }
         .onChange(of: selected) { _, _ in pushEntities() }
-        .onDisappear { pushTimer?.invalidate(); pushTimer = nil }
+        .onDisappear { pushTimer?.invalidate(); pushTimer = nil; trackTimer?.invalidate(); trackTimer = nil }
     }
 
     // MARK: Controls (native strip; the HUD itself is drawn in the page)
@@ -169,6 +173,11 @@ struct Scene3DView: View {
                 } label: { glyph("slider.horizontal.3") }
                 if s.isTracking {
                     Button {
+                        follow.toggle()
+                        bridge.eval("GE.setFollow(\(follow))")
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    } label: { glyph(follow ? "scope" : "scope").foregroundStyle(follow ? Color.yellow : Color.primary) }
+                    Button {
                         cockpit.toggle()
                         bridge.eval("GE.setCockpit(\(cockpit))")
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
@@ -194,6 +203,17 @@ struct Scene3DView: View {
                             .frame(width: 120).tint(.orange)
                     }
                     pill("Clear", icon: "xmark.circle", active: false, tint: .gray) { bridge.eval("GE.clearTools()") }
+                }
+                .padding(.horizontal, 12)
+            }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(realismPresets, id: \.0) { r in
+                        pill(r.1, icon: r.2, active: s.sceneRealism == r.0, tint: .orange) {
+                            s.sceneRealism = r.0
+                            bridge.eval("GE.setRealism('\(r.0)')")
+                        }
+                    }
                 }
                 .padding(.horizontal, 12)
             }
@@ -233,11 +253,13 @@ struct Scene3DView: View {
             status = "\(s.basemap.title) · tap to inspect"
             let assets = s.ionAssets.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
             let gkey = (s.googleMapsKey.isEmpty ? CesiumConfig.defaultGoogleKey : s.googleMapsKey).replacingOccurrences(of: "'", with: "")
-            bridge.eval("GE.init({basemap:'\(s.basemap.rawValue)', terrain:\(s.sceneTerrain), buildings:\(s.sceneBuildings), assets:\(assets), sensor:'\(s.sensor.rawValue)', hud:\(s.hud), accent:'\(s.accentHex)', googleKey:'\(gkey)'})")
+            bridge.eval("GE.init({basemap:'\(s.basemap.rawValue)', terrain:\(s.sceneTerrain), buildings:\(s.sceneBuildings), assets:\(assets), sensor:'\(s.sensor.rawValue)', hud:\(s.hud), accent:'\(s.accentHex)', googleKey:'\(gkey)', realism:'\(s.sceneRealism)'})")
             let h = max(s.distance, 300)
             bridge.eval(String(format: "GE.setView(%.6f,%.6f,%.1f,%.2f,%.2f)", s.center.latitude, s.center.longitude, h, s.heading, s.pitch))
             pushEntities()
-            pushTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in pushEntities() }
+            pushTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in pushEntities() }
+            trackTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in pushTrack() }
+            bridge.eval("GE.setFollow(\(follow))")
             Task { await reloadCatalog() }
         case "tap":
             guard let lat = msg["lat"] as? Double, let lon = msg["lon"] as? Double else { return }
@@ -310,12 +332,12 @@ struct Scene3DView: View {
             let acs = dense ? (s.contacts + s.militaryContacts) : s.visibleContacts
             for c in acs.prefix(dense ? 6000 : 500) {
                 items.append(["id": "ac-\(c.id)", "kind": "ac", "lat": c.lat, "lon": c.lon, "alt": Double(c.altFt ?? 0) * 0.3048,
-                              "label": c.displayName, "heading": c.track, "mil": c.military, "spd": c.groundSpeedKt ?? 0,
+                              "label": c.displayName, "heading": c.track, "mil": c.military, "spd": c.groundSpeedKt ?? 0, "model": aircraftModel(c),
                               "sub": [c.type ?? "", c.registration ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")])
             }
             let shs = dense ? Array(s.ships.values) : s.visibleShips
             for v in shs.prefix(dense ? 3000 : 400) {
-                items.append(["id": "sh-\(v.id)", "kind": "sh", "lat": v.lat, "lon": v.lon, "alt": 0, "label": v.displayName, "heading": v.cog, "mil": false, "spd": v.sogKt, "sub": "MMSI \(v.id)"])
+                items.append(["id": "sh-\(v.id)", "kind": "sh", "lat": v.lat, "lon": v.lon, "alt": 0, "label": v.displayName, "heading": v.cog, "mil": false, "spd": v.sogKt, "sub": "MMSI \(v.id)", "model": shipModel(v)])
             }
             for q in s.visibleQuakes.prefix(400) {
                 items.append(["id": "eq-\(q.id)", "kind": "eq", "lat": q.lat, "lon": q.lon, "alt": 0, "label": String(format: "M%.1f", q.mag), "heading": 0, "mil": false,
@@ -326,23 +348,23 @@ struct Scene3DView: View {
             }
             for sat in s.visibleSatellites.prefix(300) {
                 items.append(["id": "sat-\(sat.id)", "kind": "sat", "lat": sat.lat, "lon": sat.lon, "alt": sat.altKm * 1000, "label": sat.name, "heading": 0, "mil": false,
-                              "sub": "\(sat.cls.label) · \(Int(sat.altKm)) km", "cls": sat.cls.rawValue])
+                              "sub": "\(sat.cls.label) · \(Int(sat.altKm)) km", "cls": sat.cls.rawValue, "model": sat.cls == .station ? "iss" : sat.cls == .starlink ? "starlink" : "sat"])
             }
             for tr in s.visibleTrains.prefix(300) {
-                items.append(["id": "train-\(tr.id)", "kind": "train", "lat": tr.lat, "lon": tr.lon, "alt": 0, "label": tr.name, "heading": 0, "mil": false, "sub": "\(tr.operatorName) · \(Int(tr.speedKmh)) km/h"])
+                items.append(["id": "train-\(tr.id)", "kind": "train", "lat": tr.lat, "lon": tr.lon, "alt": 0, "label": tr.name, "heading": 0, "mil": false, "sub": "\(tr.operatorName) · \(Int(tr.speedKmh)) km/h", "model": "train"])
             }
             for ap in s.visibleAirports.prefix(200) {
                 items.append(["id": "apt-\(ap.id)", "kind": "apt", "lat": ap.lat, "lon": ap.lon, "alt": 0, "label": ap.iata.isEmpty ? ap.id : ap.iata, "heading": 0, "mil": false, "sub": ap.name])
             }
             for n in s.infra.prefix(300) {
-                items.append(["id": "infra-\(n.id)", "kind": "infra", "lat": n.lat, "lon": n.lon, "alt": 0, "label": n.name, "heading": 0, "mil": false, "sub": n.kind.label])
+                items.append(["id": "infra-\(n.id)", "kind": "infra", "lat": n.lat, "lon": n.lon, "alt": 0, "label": n.name, "heading": 0, "mil": false, "sub": n.kind.label, "model": n.kind == .dam ? "dam" : n.kind == .datacenter ? "datacenter" : "substation"])
             }
             for st in s.storms.prefix(100) {
                 items.append(["id": "storm-\(st.id)", "kind": "storm", "lat": st.lat, "lon": st.lon, "alt": 0, "label": "STORM", "heading": st.headingDeg, "mil": false, "sub": "\(Int(st.speedKmh)) km/h · \(Int(st.intensity)) dBZ"])
             }
             for cam in s.visibleCameras.prefix(300) {
                 items.append(["id": "cam-\(cam.id)", "kind": "cam", "lat": cam.lat, "lon": cam.lon, "alt": 0, "label": cam.name, "heading": cam.heading ?? -1, "mil": false,
-                              "img": cam.imageURL, "sub": "\(cam.source)\(cam.isLiveVideo ? " · LIVE" : "")", "watch": s.cctv.watching.contains(cam.id)])
+                              "img": cam.imageURL, "sub": "\(cam.source)\(cam.isLiveVideo ? " · LIVE" : "")", "watch": s.cctv.watching.contains(cam.id), "model": "camera"])
             }
         }
         var polys: [[String: Any]] = []
@@ -365,19 +387,60 @@ struct Scene3DView: View {
         }
         var sel: [String: Any] = [:]
         if let e = selected { sel = ["lat": e.lat, "lon": e.lon, "title": e.title, "kind": e.kind.rawValue] }
-        var track: [String: Any] = [:]
-        if let te = s.trackedEntity, let tc = s.trackedCoord {
-            let c = (s.contacts + s.militaryContacts).first { "ac-\($0.id)" == te.id }
-            track = ["id": te.id, "lat": tc.latitude, "lon": tc.longitude, "alt": Double(c?.altFt ?? 0) * 0.3048,
-                     "heading": c?.track ?? 0, "spd": c?.groundSpeedKt ?? 0, "label": te.title, "kind": te.kind.rawValue,
-                     "sub": [c?.type ?? "", c?.registration ?? "", c?.military == true ? "MILITARY" : ""].filter { !$0.isEmpty }.joined(separator: " · "),
-                     "trail": s.trail.suffix(200).flatMap { [$0.longitude, $0.latitude] }]
-        }
+        let track = trackPayload()
         let payload: [String: Any] = ["entities": items, "polys": polys, "selected": sel, "track": track,
                                       "counts": ["ac": s.contacts.count + s.militaryContacts.count, "sh": s.ships.count, "sat": s.satellites.count, "cam": s.cameras.count],
                                       "orb": s.satellites.count, "pass": Int(Date().timeIntervalSince1970 / 90) % 10000]
         guard let d = try? JSONSerialization.data(withJSONObject: payload), let js = String(data: d, encoding: .utf8) else { return }
         bridge.eval("GE.setData(\(js))")
+    }
+
+    // MARK: Model mapping (procedural library from godseye-tiles/models)
+
+    private func aircraftModel(_ c: Contact) -> String {
+        let t = (c.type ?? "").uppercased()
+        switch c.aircraftClass {
+        case .heli: return "heli"
+        case .drone: return "drone"
+        case .light: return "ga"
+        case .heavy: return ["K35R", "KC10", "KC46", "A332", "A310"].contains(t) || c.military ? "tanker" : "heavy"
+        case .jet: break
+        }
+        if ["F16", "F15", "F18", "F35", "F22", "EUFI", "RFAL", "GRIP", "TOR", "A10", "F14", "MIG", "SU27", "SU30", "SU35", "T38", "HAWK", "L39"].contains(where: { t.hasPrefix($0) }) { return "fighter" }
+        if ["CRJ", "E17", "E19", "E75", "E45", "E35", "DH8", "AT4", "AT7", "AT72", "SF34", "F70", "F100", "B461", "B462", "B463"].contains(where: { t.hasPrefix($0) }) { return "regional" }
+        if ["GLF", "GL", "CL3", "CL6", "C5", "C6", "C7", "E55", "E50", "LJ", "FA", "HDJ", "PC12", "PC24", "PRM", "BE4", "H25", "GA5", "GA6", "GALX", "ASTR", "F2TH", "F900", "FA7X", "FA8X"].contains(where: { t.hasPrefix($0) }) { return "bizjet" }
+        return "airliner"
+    }
+
+    private func shipModel(_ v: Ship) -> String {
+        let n = v.name.uppercased()
+        if n.contains("TANKER") || n.contains(" OIL") || n.contains("CHEM") || n.contains("LNG") || n.contains("LPG") { return "tanker_ship" }
+        if n.contains("MAERSK") || n.contains("MSC ") || n.contains("EVER ") || n.contains("CMA") || n.contains("COSCO") || n.contains("HAPAG") || n.contains("CONTAINER") || n.contains("EXPRESS") { return "container" }
+        if n.contains("CRUISE") || n.contains("CARNIVAL") || n.contains("ROYAL") || n.contains("NORWEGIAN") || n.contains("CELEBRITY") || n.contains("PRINCESS") || n.contains("MSC ") && n.contains("SEA") { return "cruise" }
+        if n.contains("TUG") || n.contains("TOW") || n.hasPrefix("ATB") { return "tug" }
+        if n.contains("FISH") || n.hasPrefix("F/V") || n.contains("TRAWL") || n.contains("SEINER") { return "fishing" }
+        if n.contains("YACHT") || n.hasPrefix("M/Y") || n.hasPrefix("S/Y") || n.hasPrefix("MY ") { return "yacht" }
+        return "vessel"
+    }
+
+    private func trackPayload() -> [String: Any] {
+        guard let te = s.trackedEntity, let tc = s.trackedCoord else { return [:] }
+        let c = (s.contacts + s.militaryContacts).first { "ac-\($0.id)" == te.id }
+        let v = s.ships.values.first { "sh-\($0.id)" == te.id }
+        return ["id": te.id, "lat": tc.latitude, "lon": tc.longitude, "alt": Double(c?.altFt ?? 0) * 0.3048,
+                "heading": c?.track ?? v?.cog ?? 0, "spd": c?.groundSpeedKt ?? v?.sogKt ?? 0, "label": te.title, "kind": te.kind.rawValue,
+                "sub": [c?.type ?? "", c?.registration ?? "", c?.military == true ? "MILITARY" : ""].filter { !$0.isEmpty }.joined(separator: " · "),
+                "ts": Date().timeIntervalSince1970,
+                "model": c.map { aircraftModel($0) } ?? v.map { shipModel($0) } ?? "",
+                "trail": s.trail.suffix(200).flatMap { [$0.longitude, $0.latitude] }]
+    }
+
+    /// 1 Hz: only the tracked target — the page dead-reckons between these at frame rate.
+    private func pushTrack() {
+        guard ready, s.isTracking else { return }
+        let tr = trackPayload()
+        guard !tr.isEmpty, let d = try? JSONSerialization.data(withJSONObject: tr), let js = String(data: d, encoding: .utf8) else { return }
+        bridge.eval("GE.setTrack(\(js))")
     }
 
     // MARK: Hand-rolled tiles
@@ -411,9 +474,16 @@ struct Scene3DView: View {
     }
 
     private func pushCustomTilesets() {
-        let urls = allTilesets.filter { s.enabledTilesets.contains($0.0) }.map { $0.2 }
-        guard let d = try? JSONSerialization.data(withJSONObject: urls), let js = String(data: d, encoding: .utf8) else { return }
+        let wanted = allTilesets.filter { s.enabledTilesets.contains($0.0) }
+        let list: [[String: Any]] = wanted.map { w in
+            let meta = catalog.tilesets.first { $0.id == w.0 }
+            var d: [String: Any] = ["url": w.2, "kind": meta?.kind ?? "custom"]
+            if let b = meta?.baseHeight { d["baseHeight"] = b }
+            return d
+        }
+        guard let d = try? JSONSerialization.data(withJSONObject: list), let js = String(data: d, encoding: .utf8) else { return }
         bridge.eval("GE.setCustomTilesets(\(js))")
+        if let m = catalog.models { bridge.eval("GE.setModels('\(m.replacingOccurrences(of: "'", with: ""))')") }
     }
 
     private func reloadCatalog() async {
@@ -732,17 +802,66 @@ window.GE = (() => {
     L.addImageryProvider(new Cesium.UrlTemplateImageryProvider({ url, minimumLevel: minZ||0, maximumLevel: maxZ||22, credit: 'hand-rolled · godseye-tiles', hasAlphaChannel: true }));
     $('src').textContent = 'MRZEFV'; status('HAND-ROLLED RASTER · TAP TO INSPECT'); viewer.scene.requestRender();
   }
-  async function setCustomTilesets(urls){
+  async function setCustomTilesets(list){
     if (!viewer) return;
-    const want = new Set(urls||[]);
+    const items = (list||[]).map(x => typeof x === 'string' ? { url: x } : x);
+    const want = new Map(items.map(x => [x.url, x]));
     for (const [u, t] of customTs) { if (!want.has(u)) { viewer.scene.primitives.remove(t); customTs.delete(u); } }
-    for (const u of want) {
+    for (const [u, meta] of want) {
       if (customTs.has(u)) continue;
-      try { const t = await Cesium.Cesium3DTileset.fromUrl(u, { maximumScreenSpaceError: 8, pointCloudShading: { attenuation: true, maximumAttenuation: 6, eyeDomeLighting: true } });
-        viewer.scene.primitives.add(t); customTs.set(u, t); status('LOADED ' + u.split('/').slice(-3,-1).join('/').toUpperCase()); }
-      catch(e){ status('TILESET FAILED: ' + (e.message||e)); }
+      try {
+        const t = await Cesium.Cesium3DTileset.fromUrl(u, { maximumScreenSpaceError: meta.kind === 'mesh' ? 4 : 8, pointCloudShading: { attenuation: true, maximumAttenuation: 6, eyeDomeLighting: true } });
+        // Hand-rolled mesh is authored in orthometric height; with no real terrain underneath, sit it on the ellipsoid.
+        if (meta.baseHeight && !(TOKEN && cfg.terrain)) {
+          const c = t.boundingSphere.center; const n = Cesium.Ellipsoid.WGS84.geodeticSurfaceNormal(c, new Cesium.Cartesian3());
+          t.modelMatrix = Cesium.Matrix4.fromTranslation(Cesium.Cartesian3.multiplyByScalar(n, -meta.baseHeight, new Cesium.Cartesian3()));
+        }
+        if (meta.kind === 'mesh' || meta.kind === 'buildings' || meta.kind === 'trees') t.shadows = viewer.shadows ? Cesium.ShadowMode.ENABLED : Cesium.ShadowMode.DISABLED;
+        viewer.scene.primitives.add(t); customTs.set(u, t); status('LOADED ' + u.split('/').slice(-3,-1).join('/').toUpperCase());
+      } catch(e){ status('TILESET FAILED: ' + (e.message||e)); }
     }
     viewer.scene.requestRender();
+  }
+
+  // ---- procedural model library (godseye-tiles/models) ----
+  let modelsBase = null;
+  function setModels(base){ modelsBase = base && base.endsWith('/') ? base : (base ? base + '/' : null); }
+  function modelUri(e){
+    if (modelsBase && e.model) return modelsBase + e.model + '.glb';
+    if (e.kind === 'ac') return PLANE_GLB;
+    if (e.kind === 'sh') return SHIP_GLB;
+    return null;
+  }
+  function modelScale(e){ return e.kind === 'ac' ? 1.0 : e.kind === 'sat' ? 40 : 1.0; }
+
+  // ---- realism presets ----
+  let realism = 'off';
+  function localHour(h){ const d = new Date(); const lonH = (viewer ? Cesium.Math.toDegrees(viewer.camera.positionCartographic.longitude) : 0) / 15; d.setUTCHours(Math.round(h - lonH + 24) % 24, 0, 0, 0); return Cesium.JulianDate.fromDate(d); }
+  function setRealism(name){
+    realism = name || 'off'; if (!viewer) return;
+    const sc = viewer.scene, g = sc.globe;
+    const on = realism !== 'off';
+    sc.highDynamicRange = on; sc.postProcessStages.bloom.enabled = on && realism !== 'overcast';
+    sc.postProcessStages.bloom.uniforms.brightness = -0.35; sc.postProcessStages.bloom.uniforms.contrast = 96; sc.postProcessStages.bloom.uniforms.glowOnly = false;
+    sc.skyAtmosphere.show = true; sc.skyAtmosphere.hueShift = 0; sc.skyAtmosphere.saturationShift = 0; sc.skyAtmosphere.brightnessShift = 0;
+    g.showGroundAtmosphere = on; g.enableLighting = on && realism !== 'overcast'; g.dynamicAtmosphereLighting = on; g.dynamicAtmosphereLightingFromSun = on;
+    sc.fog.enabled = on; sc.fog.density = realism === 'overcast' ? 0.0012 : realism === 'night' ? 0.0004 : 0.0006; sc.fog.minimumBrightness = realism === 'night' ? 0.02 : 0.15;
+    sc.light = new Cesium.SunLight();
+    viewer.shadows = on && realism !== 'overcast' && realism !== 'night';
+    viewer.terrainShadows = viewer.shadows ? Cesium.ShadowMode.ENABLED : Cesium.ShadowMode.DISABLED;
+    for (const t of customTs.values()) t.shadows = viewer.shadows ? Cesium.ShadowMode.ENABLED : Cesium.ShadowMode.DISABLED;
+    if (tileset) tileset.shadows = viewer.shadows ? Cesium.ShadowMode.ENABLED : Cesium.ShadowMode.DISABLED;
+    switch (realism) {
+      case 'day': viewer.clock.currentTime = localHour(13); sc.light.intensity = 2.4; break;
+      case 'golden': viewer.clock.currentTime = localHour(19); sc.light.intensity = 3.2; sc.skyAtmosphere.hueShift = -0.03; sc.skyAtmosphere.saturationShift = 0.25; sc.skyAtmosphere.brightnessShift = -0.1; break;
+      case 'night': viewer.clock.currentTime = localHour(1); sc.light.intensity = 0.35; sc.skyAtmosphere.brightnessShift = -0.6; g.nightFadeOutDistance = 1e7; g.nightFadeInDistance = 5e6; break;
+      case 'overcast': viewer.clock.currentTime = localHour(11); sc.light.intensity = 1.1; sc.skyAtmosphere.saturationShift = -0.6; sc.skyAtmosphere.brightnessShift = -0.25; break;
+      default: sc.light.intensity = 2.0; g.enableLighting = false; sc.fog.enabled = false;
+    }
+    viewer.clock.shouldAnimate = false;
+    sc.requestRenderMode = !on && !(SHADERS[sensor] && sensor !== 'flir') && !trk;
+    status('REALISM ' + realism.toUpperCase());
+    sc.requestRender();
   }
   async function setTerrain(on){
     if (!viewer) return;
@@ -795,7 +914,7 @@ window.GE = (() => {
     viewer.scene.postProcessStages.fxaa.enabled = true;
     viewer.scene.skyAtmosphere.show = true;
     setBasemap(cfg.basemap || 'esriImagery'); setTerrain(!!cfg.terrain); setBuildings(!!cfg.buildings); loadAssets(cfg.assets);
-    setSensor(cfg.sensor || 'normal'); setHUD(cfg.hud !== false);
+    setSensor(cfg.sensor || 'normal'); setHUD(cfg.hud !== false); setRealism(cfg.realism || 'off');
     bindCtx();
     $('kh').textContent = String(4000 + Math.floor(Math.random()*999)); $('ops').textContent = String(4100 + Math.floor(Math.random()*99));
 
@@ -818,6 +937,9 @@ window.GE = (() => {
       if (Cesium.defined(picked) && picked.id && picked.id.id && String(picked.id.id).startsWith('e:')) post({type:'track', id: picked.id.id.slice(2)});
     }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
 
+    viewer.scene.preUpdate.addEventListener(trackFrame);
+    viewer.camera.moveStart.addEventListener(() => { userMoving = true; });
+    viewer.camera.moveEnd.addEventListener(() => { userMoving = false; });
     viewer.camera.changed.addEventListener(readout);
     viewer.camera.percentageChanged = 0.01;
     viewer.camera.moveEnd.addEventListener(() => {
@@ -947,17 +1069,71 @@ window.GE = (() => {
     viewer.scene.requestRender();
   }
 
+  // ---- live track: dead-reckon at frame rate, optional camera follow ----
+  let trk = null, follow = true, followHPR = null, followRange = null, userMoving = false;
+  function setFollow(on){ follow = !!on; followHPR = null; if (!follow && viewer) viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY); status(follow ? 'FOLLOW ON · DRAG TO ORBIT TARGET' : 'FOLLOW OFF'); }
+  function setTrack(t){
+    if (!viewer) return;
+    if (!t || !t.id) { trk = null; if (lastData) lastData.track = {}; viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY); viewer.scene.requestRenderMode = !(SHADERS[sensor] && sensor !== 'flir'); return; }
+    if (!trk || trk.id !== t.id) { followHPR = null; }
+    trk = Object.assign({}, t, { t0: performance.now(), lat0: t.lat, lon0: t.lon });
+    if (lastData) lastData.track = t;
+    viewer.scene.requestRenderMode = false;   // continuous render while tracking
+  }
+  function trkPos(){
+    if (!trk) return null;
+    const dt = Math.min(15, (performance.now() - trk.t0) / 1000);
+    const m = (trk.spd || 0) * 0.514444 * dt, hd = (trk.heading || 0) * Math.PI / 180;
+    const dlat = (m * Math.cos(hd)) / 110540, dlon = (m * Math.sin(hd)) / (111320 * Math.cos(trk.lat0 * Math.PI / 180));
+    return { lat: trk.lat0 + dlat, lon: trk.lon0 + dlon, alt: trk.alt || 0 };
+  }
+  function trackFrame(){
+    if (!trk || !viewer) return;
+    const p = trkPos(); const pos = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.alt);
+    const ids = ['e:' + trk.id, 'trk', 'det'];
+    for (const id of ids) { const e = viewer.entities.getById(id); if (e) { e.position = pos; if (id === 'e:' + trk.id) e.orientation = orient(pos, trk.heading); } }
+    for (let i = 0; i < 5; i++) { const le = viewer.entities.getById('ld:' + i); if (le && le.polyline) { const ps = le.polyline.positions.getValue ? le.polyline.positions.getValue(Cesium.JulianDate.now()) : le.polyline.positions; if (ps && ps.length === 2) { le.polyline.positions = [pos, ps[1]]; le.position = Cesium.Cartesian3.midpoint(pos, ps[1], new Cesium.Cartesian3()); } } }
+    if (cockpit) { cockpitAt(p); return; }
+    if (follow) {
+      const cam = viewer.camera;
+      if (!followHPR) {
+        // seed from the current view: keep the user's heading/pitch, range = distance camera→target
+        const range = Math.max(400, Cesium.Cartesian3.distance(cam.positionWC, pos));
+        followHPR = new Cesium.HeadingPitchRange(cam.heading, Math.min(cam.pitch, Cesium.Math.toRadians(-15)), range);
+      } else if (!userMoving) {
+        // remember how the user orbited/zoomed relative to the target
+        const transform = Cesium.Transforms.eastNorthUpToFixedFrame(pos);
+        const inv = Cesium.Matrix4.inverse(transform, new Cesium.Matrix4());
+        const local = Cesium.Matrix4.multiplyByPoint(inv, cam.positionWC, new Cesium.Cartesian3());
+        const range = Cesium.Cartesian3.magnitude(local);
+        if (range > 50) followHPR = new Cesium.HeadingPitchRange(cam.heading, cam.pitch, range);
+      }
+      cam.lookAt(pos, followHPR);
+    }
+  }
+  function cockpitAt(p){
+    const alt = Math.max(p.alt || 0, 60), hd = Cesium.Math.toRadians(trk.heading || 0);
+    const back = trk.kind === 'ship' ? 400 : 700, up = trk.kind === 'ship' ? 120 : 220;
+    const pos = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, alt);
+    const enu = Cesium.Transforms.eastNorthUpToFixedFrame(pos);
+    const off = new Cesium.Cartesian3(-Math.sin(hd)*back, -Math.cos(hd)*back, up);
+    const dest = Cesium.Matrix4.multiplyByPoint(enu, off, new Cesium.Cartesian3());
+    viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+    viewer.camera.setView({ destination: dest, orientation: { heading: hd, pitch: Cesium.Math.toRadians(-14), roll: 0 } });
+  }
+
   // ---- cockpit ----
   function setCockpit(on){
     cockpit = !!on && !!(lastData && lastData.track && lastData.track.id);
     $('cock').classList.toggle('on', cockpit);
     $('cross').style.display = cockpit ? 'none' : '';
     viewer.scene.screenSpaceCameraController.enableInputs = !cockpit;
-    if (cockpit) cockpitTick(); else { viewer.trackedEntity = undefined; }
+    if (cockpit) cockpitTick(); else { viewer.trackedEntity = undefined; viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY); followHPR = null; }
     post({type:'cockpit', on: cockpit});
   }
   function cockpitTick(){
     const t = lastData && lastData.track; if (!t || !t.id) { setCockpit(false); return; }
+    if (trk) { const p = trkPos(); cockpitAt(p); updateTape(t); return; }
     const alt = Math.max(t.alt || 0, 60), hd = Cesium.Math.toRadians(t.heading || 0);
     const back = t.kind === 'ship' ? 400 : 700, up = t.kind === 'ship' ? 120 : 220;
     const pos = Cesium.Cartesian3.fromDegrees(t.lon, t.lat, alt);
@@ -965,6 +1141,9 @@ window.GE = (() => {
     const off = new Cesium.Cartesian3(-Math.sin(hd)*back, -Math.cos(hd)*back, up);
     const dest = Cesium.Matrix4.multiplyByPoint(enu, off, new Cesium.Cartesian3());
     viewer.camera.setView({ destination: dest, orientation: { heading: hd, pitch: Cesium.Math.toRadians(-14), roll: 0 } });
+    updateTape(t);
+  }
+  function updateTape(t){
     $('cname').textContent = (t.label||'').toUpperCase(); $('cspd').textContent = Math.round(t.spd||0); $('chdg').textContent = String(Math.round(t.heading||0)).padStart(3,'0'); $('calt').textContent = Math.round((t.alt||0)*3.281).toLocaleString();
     const marks = []; for (let d = -60; d <= 60; d += 15) { const b = ((t.heading||0) + d + 360) % 360; const n = Math.round(b/15)*15 % 360; marks.push(n === 0 ? 'N' : n === 90 ? 'E' : n === 180 ? 'S' : n === 270 ? 'W' : (d === 0 ? '▲' : String(n))); } $('compass').textContent = marks.join('   ');
     viewer.scene.requestRender();
@@ -1025,6 +1204,7 @@ window.GE = (() => {
     const boxed = camH < 60000;
     for (const e of (d.entities||[])) {
       const id = 'e:' + e.id; keep.add(id);
+      if (trk && e.id === trk.id && viewer.entities.getById(id)) continue;   // dead-reckoned at frame rate, don't snap back
       const pos = Cesium.Cartesian3.fromDegrees(e.lon, e.lat, e.alt||0);
       const col = e.mil ? colors.mil : (colors[e.kind] || '#fff');
       const cc = Cesium.Color.fromCssColorString(col);
@@ -1032,10 +1212,11 @@ window.GE = (() => {
       const isCam = e.kind === 'cam';
       const img = boxed ? (isCam && camH < 8000 ? (camImgs.get(e.id) || sprite(e.label, e.sub, col, { icon: '▣' })) : sprite(e.label, e.sub, col, { icon: icons[e.kind] || '▣' })) : null;
       if (isCam && camH < 8000 && !camImgs.has(e.id)) { camImgs.set(e.id, null); camCard(e.img, e.label).then(cv => { camImgs.set(e.id, cv); const en = viewer.entities.getById(id); if (en && en.billboard) { en.billboard.image = cv; viewer.scene.requestRender(); } }); }
-      const useModel = boxed && camH < 30000 && (e.kind === 'ac' || e.kind === 'sh');
+      const mUri = modelUri(e);
+      const useModel = boxed && !!mUri && (camH < 30000 && (e.kind === 'ac' || e.kind === 'sh') || camH < 8000 && ['train','cam','infra'].includes(e.kind) || e.kind === 'sat' && camH > 200000);
       if (!ent) {
         ent = viewer.entities.add({ id, position: pos, orientation: orient(pos, e.heading),
-          model: (e.kind === 'ac' || e.kind === 'sh') ? { uri: e.kind === 'ac' ? PLANE_GLB : SHIP_GLB, minimumPixelSize: 26, maximumScale: 400, scale: e.kind === 'ac' ? 1.4 : 1.0, color: cc.withAlpha(.95), colorBlendMode: Cesium.ColorBlendMode.MIX, colorBlendAmount: .55, silhouetteColor: Cesium.Color.WHITE.withAlpha(.35), silhouetteSize: 1, show: useModel, heightReference: e.kind === 'sh' ? Cesium.HeightReference.CLAMP_TO_GROUND : Cesium.HeightReference.NONE } : undefined,
+          model: mUri ? { uri: mUri, minimumPixelSize: e.kind === 'sat' ? 18 : 26, maximumScale: e.kind === 'sat' ? 20000 : 400, scale: modelScale(e), color: modelsBase ? Cesium.Color.WHITE : cc.withAlpha(.95), colorBlendMode: Cesium.ColorBlendMode.MIX, colorBlendAmount: modelsBase ? (e.mil ? .35 : .12) : .55, silhouetteColor: Cesium.Color.WHITE.withAlpha(.3), silhouetteSize: 1, show: useModel, shadows: Cesium.ShadowMode.CAST_ONLY, heightReference: (e.kind === 'sh' || e.kind === 'train' || e.kind === 'cam' || e.kind === 'infra') ? Cesium.HeightReference.CLAMP_TO_GROUND : Cesium.HeightReference.NONE } : undefined,
           point: { pixelSize: e.kind==='ac'?6:5, color: cc, outlineColor: Cesium.Color.BLACK, outlineWidth: 1, heightReference: e.kind==='ac'?Cesium.HeightReference.NONE:Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY, show: !boxed },
           billboard: { image: img || sprite(e.label, e.sub, col), verticalOrigin: Cesium.VerticalOrigin.BOTTOM, pixelOffset: new Cesium.Cartesian2(0, useModel ? -22 : -6), scale: 0.5, heightReference: e.kind==='ac'?Cesium.HeightReference.NONE:Cesium.HeightReference.CLAMP_TO_GROUND, disableDepthTestDistance: Number.POSITIVE_INFINITY, show: boxed, scaleByDistance: new Cesium.NearFarScalar(500,1.0,200000,0.45) } });
       } else { ent.position = pos; ent.orientation = orient(pos, e.heading); if (boxed && img) ent.billboard.image = img; ent.point.show = !boxed; ent.billboard.show = boxed; if (ent.model) { ent.model.show = useModel; } ent.billboard.pixelOffset = new Cesium.Cartesian2(0, useModel ? -22 : -6); }
@@ -1086,7 +1267,8 @@ window.GE = (() => {
         if (!tr) viewer.entities.add({ id:'trail', polyline:{ positions: ps, width: 2, material: new Cesium.PolylineGlowMaterialProperty({ glowPower: .25, color: Cesium.Color.fromCssColorString('#ff3b30') }), clampToGround: t.kind === 'ship' } });
         else tr.polyline.positions = ps;
       }
-    } else if (cockpit) setCockpit(false);
+    } else { if (cockpit) setCockpit(false); if (trk) setTrack(null); }
+    if (d.track && d.track.id && (!trk || trk.id !== d.track.id)) setTrack(d.track);
     for (const ent of viewer.entities.values.slice()) { if (!keep.has(ent.id)) viewer.entities.remove(ent); }
     try { renderCtx(d); } catch(e) {}
     const cts = d.counts || {}; $('nac').textContent = cts.ac||0; $('nsh').textContent = cts.sh||0; $('nsat').textContent = cts.sat||0; $('ncam').textContent = cts.cam||0;
@@ -1095,7 +1277,7 @@ window.GE = (() => {
     viewer.scene.requestRender();
   }
 
-  return { init, setBasemap, setTerrain, setBuildings, loadAssets, setView, setData, home, tilt, setCustomRaster, setCustomTilesets, setSensor, setHUD, setCockpit, setTool, clearTools, setShadows, focus };
+  return { init, setBasemap, setTerrain, setBuildings, loadAssets, setView, setData, home, tilt, setCustomRaster, setCustomTilesets, setSensor, setHUD, setCockpit, setTool, clearTools, setShadows, focus, setTrack, setFollow, setModels, setRealism };
 })();
 window.addEventListener('load', () => post({type:'ready'}));
 window.addEventListener('error', (e) => post({type:'status', text: 'JS: ' + e.message}));

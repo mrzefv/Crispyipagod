@@ -23,7 +23,7 @@ on:
         description: "Which stacks to build"
         type: choice
         default: "all"
-        options: [all, naip, lidar, buildings]
+        options: [all, naip, lidar, buildings, mesh, trees, models]
       raster_zoom:
         description: "Raster zoom range"
         required: true
@@ -98,8 +98,63 @@ jobs:
           retention-days: 3
           if-no-files-found: ignore
 
+  mesh:
+    if: ${{ inputs.layers == 'all' || inputs.layers == 'mesh' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GDAL + deps
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gdal-bin
+          pip install --break-system-packages "laspy[lazrs]" planetary-computer requests pyproj numpy scipy pillow trimesh
+      - name: Build realism mesh (3DEP DSM + NAIP texture)
+        run: python3 scripts/mesh.py --name "${{ inputs.name }}" --lat ${{ inputs.lat }} --lon ${{ inputs.lon }} --radius-km ${{ inputs.radius_km }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mesh
+          path: site
+          retention-days: 3
+          if-no-files-found: ignore
+
+  trees:
+    if: ${{ inputs.layers == 'all' || inputs.layers == 'trees' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install trimesh shapely numpy requests
+      - name: Build vegetation 3D Tiles
+        run: python3 scripts/trees.py --name "${{ inputs.name }}" --lat ${{ inputs.lat }} --lon ${{ inputs.lon }} --radius-km ${{ inputs.radius_km }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trees
+          path: site
+          retention-days: 3
+          if-no-files-found: ignore
+
+  models:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install trimesh numpy
+      - name: Build procedural model library
+        run: python3 scripts/models.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: models
+          path: site
+          retention-days: 3
+
   publish:
-    needs: [naip, lidar, buildings]
+    needs: [naip, lidar, buildings, mesh, trees, models]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     steps:
@@ -119,6 +174,8 @@ jobs:
         run: |
           for d in incoming/*/; do [ -d "$d" ] && cp -R "$d". site/; done
           python3 scripts/catalog.py --site site --base "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}"
+          # keys.json on main is the source of truth for the app's auto-filled free keys
+          [ -f keys.json ] && cp keys.json site/keys.json
           touch site/.nojekyll
           du -sh site
       - name: Push to gh-pages

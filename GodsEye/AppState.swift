@@ -218,6 +218,8 @@ final class AppState: ObservableObject {
     @Published var ionToken: String { didSet { ud.set(ionToken, forKey: "ionToken") } }
     @Published var ionAssets: String { didSet { ud.set(ionAssets, forKey: "ionAssets") } }
     @Published var googleMapsKey: String { didSet { ud.set(googleMapsKey, forKey: "googleMapsKey") } }
+    @Published var keysAutoFilled: [String] = []
+    @Published var keysMessage = ""
     @Published var basemap: Basemap { didSet { ud.set(basemap.rawValue, forKey: "basemap") } }
     @Published var sceneTerrain: Bool { didSet { ud.set(sceneTerrain, forKey: "sceneTerrain") } }
     @Published var sceneBuildings: Bool { didSet { ud.set(sceneBuildings, forKey: "sceneBuildings") } }
@@ -228,6 +230,7 @@ final class AppState: ObservableObject {
     @Published var customTileURL: String { didSet { ud.set(customTileURL, forKey: "customTileURL") } }
     @Published var customTilesets: String { didSet { ud.set(customTilesets, forKey: "customTilesets") } }
     @Published var enabledTilesets: Set<String> { didSet { ud.set(Array(enabledTilesets), forKey: "enabledTilesets") } }
+    @Published var sceneRealism: String { didSet { ud.set(sceneRealism, forKey: "sceneRealism") } }
     @Published var anthropicKey: String { didSet { ud.set(anthropicKey, forKey: "anthropicKey") } }
     @Published var aiModel: String { didSet { ud.set(aiModel, forKey: "aiModel") } }
     @Published var alertMilitary: Bool { didSet { ud.set(alertMilitary, forKey: "alertMil"); if alertMilitary { Alerts.shared.requestPermission() } } }
@@ -274,6 +277,7 @@ final class AppState: ObservableObject {
         customTileURL = ud.string(forKey: "customTileURL") ?? ""
         customTilesets = ud.string(forKey: "customTilesets") ?? ""
         enabledTilesets = Set(ud.stringArray(forKey: "enabledTilesets") ?? [])
+        sceneRealism = ud.string(forKey: "sceneRealism") ?? "day"
         anthropicKey = ud.string(forKey: "anthropicKey") ?? ""
         aiModel = ud.string(forKey: "aiModel") ?? "claude-sonnet-5"
         alertMilitary = ud.bool(forKey: "alertMil")
@@ -293,6 +297,7 @@ final class AppState: ObservableObject {
         ais.onStatus = { [weak self] st in self?.aisStatus = st }
         UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
         cctv.cameraLookup = { [weak self] id in self?.cameras.first { $0.id == id } }
+        Task { [weak self] in guard let self else { return }; await RemoteKeys.apply(to: self) }
     }
 
     func neighborCamera(of cam: Camera, forward: Bool) -> Camera? {
