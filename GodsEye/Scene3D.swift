@@ -124,6 +124,14 @@ struct Scene3DView: View {
         .onChange(of: s.sceneEntities) { _, _ in pushEntities() }
         .onChange(of: s.sceneLines) { _, _ in pushEntities() }
         .onChange(of: s.propertyLines) { _, _ in pushEntities() }
+        .onChange(of: s.layers.contains(.space)) { _, on in
+            guard ready else { return }
+            bridge.eval("GE.setSpaceMode(\(jsBool(on)))")
+        }
+        .onChange(of: ready) { _, isReady in
+            guard isReady else { return }
+            bridge.eval("GE.setSpaceMode(\(jsBool(s.layers.contains(.space))))")
+        }
         .onChange(of: s.trackedID) { _, _ in pushEntities() }
         .onChange(of: selected) { _, _ in pushEntities() }
         .onDisappear { pushTimer?.invalidate(); pushTimer = nil; trackTimer?.invalidate(); trackTimer = nil }
@@ -230,6 +238,15 @@ struct Scene3DView: View {
             .background(Circle().fill(.ultraThinMaterial))
     }
 
+    private func jsBool(_ value: Bool) -> String { value ? "true" : "false" }
+    private func jsQuoted(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+    }
+
     private func pill(_ title: String, icon: String, active: Bool, tint: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
@@ -252,8 +269,12 @@ struct Scene3DView: View {
             ready = true
             status = "\(s.basemap.title) · tap to inspect"
             let assets = s.ionAssets.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
-            let gkey = (s.googleMapsKey.isEmpty ? CesiumConfig.defaultGoogleKey : s.googleMapsKey).replacingOccurrences(of: "'", with: "")
-            bridge.eval("GE.init({basemap:'\(s.basemap.rawValue)', terrain:\(s.sceneTerrain), buildings:\(s.sceneBuildings), assets:\(assets), sensor:'\(s.sensor.rawValue)', hud:\(s.hud), accent:'\(s.accentHex)', googleKey:'\(gkey)', realism:'\(s.sceneRealism)'})")
+            let basemap = jsQuoted(s.basemap.rawValue)
+            let sensor = jsQuoted(s.sensor.rawValue)
+            let accent = jsQuoted(s.accentHex)
+            let realism = jsQuoted(s.sceneRealism)
+            let gkey = jsQuoted(s.googleMapsKey.isEmpty ? CesiumConfig.defaultGoogleKey : s.googleMapsKey)
+            bridge.eval("GE.init({basemap:'\(basemap)', terrain:\(s.sceneTerrain), buildings:\(s.sceneBuildings), assets:\(assets), sensor:'\(sensor)', hud:\(s.hud), accent:'\(accent)', googleKey:'\(gkey)', realism:'\(realism)', space:\(jsBool(s.layers.contains(.space)))})")
             let h = max(s.distance, 300)
             bridge.eval(String(format: "GE.setView(%.6f,%.6f,%.1f,%.2f,%.2f)", s.center.latitude, s.center.longitude, h, s.heading, s.pitch))
             pushEntities()
@@ -760,7 +781,9 @@ const SHADERS = {
 const PLANE_GLB = 'data:model/gltf-binary;base64,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';
 const SHIP_GLB = 'data:model/gltf-binary;base64,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';
 window.GE = (() => {
-  let viewer, tileset = null, buildings = null, customAssets = [], stage = null, cfg = {}, hudOn = true, sensor = 'normal';
+  let viewer, tileset = null, buildings = null, customAssets = [], stage = null, cfg = {}, hudOn = true, sensor = 'normal', spaceMode = false;
+  let spaceFX = [];
+  let buildingReq = { token: 0, on: false, loading: false };
   let customTs = new Map(), lastData = null, cockpit = false, camImgs = new Map(), t0 = Date.now();
   const rasterCredit = { esriImagery:'ESRI', esriHybrid:'ESRI', esriStreets:'ESRI', osm:'OSM', google3D:'GOOGLE 3D', bingAerial:'BING', bingHybrid:'BING', custom:'MRZEFV' };
 
@@ -834,9 +857,52 @@ window.GE = (() => {
   }
   function modelScale(e){ return e.kind === 'ac' ? 1.0 : e.kind === 'sat' ? 40 : 1.0; }
 
+  function clearSpaceFX(){ for (const id of spaceFX) { const e = viewer && viewer.entities.getById(id); if (e) viewer.entities.remove(e); } spaceFX = []; }
+  function seedSpaceFX(){
+    if (!viewer) return;
+    clearSpaceFX();
+    const active = spaceMode;
+    if (!active) return;
+    const stars = [];
+    for (let i = 0; i < 56; i++) {
+      const lat = -72 + (i % 29) * (144 / 28);
+      const lon = ((i * 137.50776405) % 360) - 180;
+      stars.push({ id: `space:star:${i}`, label: `STARFIELD ${i+1}`, icon: '✦', lat, lon, alt: 240000 + (i % 7) * 28000, color: '#c9e8ff', s: i % 9 === 0 ? 0.44 : 0.3 });
+    }
+    const showcase = [
+      { id: 'space:galaxy:1', label: 'SPIRAL GALAXY', icon: '✺', lat: 62.5, lon: -130.3, alt: 420000, color: '#d4b7ff', s: 0.8 },
+      { id: 'space:galaxy:2', label: 'DEEP SKY CLUSTER', icon: '✶', lat: -41.7, lon: 18.4, alt: 465000, color: '#9fd7ff', s: 0.74 },
+      { id: 'space:ufo:1', label: 'UFO SCOUT', icon: '🛸', lat: 38.2, lon: -114.5, alt: 115000, color: '#9dffb2', s: 0.68 },
+      { id: 'space:ufo:2', label: 'UFO SCOUT', icon: '🛸', lat: -11.9, lon: 146.0, alt: 128000, color: '#9dffb2', s: 0.68 },
+      { id: 'space:alien:1', label: 'ALIEN SIGNAL', icon: '👽', lat: 6.8, lon: 74.2, alt: 102000, color: '#ffe680', s: 0.65 }
+    ];
+    for (const it of stars.concat(showcase)) {
+      const sp = sprite(it.label, `${Math.round(it.alt/1000)} KM · DEEP SPACE`, it.color, { icon: it.icon });
+      viewer.entities.add({ id: it.id, position: Cesium.Cartesian3.fromDegrees(it.lon, it.lat, it.alt), billboard: { image: sp, verticalOrigin: Cesium.VerticalOrigin.BOTTOM, scale: it.s, disableDepthTestDistance: Number.POSITIVE_INFINITY, scaleByDistance: new Cesium.NearFarScalar(2000, 1.0, 1500000, 0.38) } });
+      spaceFX.push(it.id);
+    }
+  }
+
   // ---- realism presets ----
   let realism = 'off';
   function localHour(h){ const d = new Date(); const lonH = (viewer ? Cesium.Math.toDegrees(viewer.camera.positionCartographic.longitude) : 0) / 15; d.setUTCHours(Math.round(h - lonH + 24) % 24, 0, 0, 0); return Cesium.JulianDate.fromDate(d); }
+  function applyBuildingStyle(){
+    if (!buildings) return;
+    const glass = realism !== 'off';
+    buildings.style = glass ? new Cesium.Cesium3DTileStyle({
+      color: {
+        conditions: [
+          ["${height} >= 220", "color('#b4d9ff', 0.82)"],
+          ["${height} >= 120", "color('#9ecfff', 0.76)"],
+          ["${height} >= 40", "color('#8fc3ff', 0.68)"],
+          ["true", "color('#7bb7ff', 0.58)"]
+        ]
+      }
+    }) : undefined;
+    buildings.maximumScreenSpaceError = glass ? 3 : 8;
+    buildings.imageBasedLightingFactor = glass ? new Cesium.Cartesian2(1.35, 1.05) : new Cesium.Cartesian2(1.0, 1.0);
+    buildings.shadows = viewer.shadows ? Cesium.ShadowMode.ENABLED : Cesium.ShadowMode.DISABLED;
+  }
   function setRealism(name){
     realism = name || 'off'; if (!viewer) return;
     const sc = viewer.scene, g = sc.globe;
@@ -858,6 +924,8 @@ window.GE = (() => {
       case 'overcast': viewer.clock.currentTime = localHour(11); sc.light.intensity = 1.1; sc.skyAtmosphere.saturationShift = -0.6; sc.skyAtmosphere.brightnessShift = -0.25; break;
       default: sc.light.intensity = 2.0; g.enableLighting = false; sc.fog.enabled = false;
     }
+    applyBuildingStyle();
+    seedSpaceFX();
     viewer.clock.shouldAnimate = false;
     sc.requestRenderMode = !on && !(SHADERS[sensor] && sensor !== 'flir') && !trk;
     status('REALISM ' + realism.toUpperCase());
@@ -871,10 +939,40 @@ window.GE = (() => {
   }
   async function setBuildings(on){
     if (!viewer) return;
+    const want = !!on;
+    if (!want) {
+      buildingReq.token++;
+      buildingReq.on = false;
+      buildingReq.loading = false;
+      if (buildings) { viewer.scene.primitives.remove(buildings); buildings = null; }
+      viewer.scene.requestRender();
+      return;
+    }
+    if (buildingReq.on && (buildingReq.loading || buildings)) return;
+    const req = ++buildingReq.token;
+    buildingReq.on = true;
+    buildingReq.loading = true;
     if (buildings) { viewer.scene.primitives.remove(buildings); buildings = null; }
-    if (on && TOKEN) { try { buildings = await Cesium.createOsmBuildingsAsync(); viewer.scene.primitives.add(buildings); } catch(e){ status('OSM BUILDINGS: ' + (e.message||e)); } }
+    if (!TOKEN) {
+      buildingReq.loading = false;
+      viewer.scene.requestRender();
+      return;
+    }
+    try {
+      const next = await Cesium.createOsmBuildingsAsync();
+      if (req !== buildingReq.token || !buildingReq.on) { if (next && typeof next.destroy === 'function') next.destroy(); return; }
+      buildingReq.loading = false;
+      buildings = next;
+      viewer.scene.primitives.add(buildings);
+      applyBuildingStyle();
+    } catch(e){
+      if (req !== buildingReq.token || !buildingReq.on) return;
+      buildingReq.loading = false;
+      status('OSM BUILDINGS: ' + (e.message||e));
+    }
     viewer.scene.requestRender();
   }
+  function setSpaceMode(on){ spaceMode = !!on; if (!viewer) return; seedSpaceFX(); viewer.scene.requestRender(); }
   async function loadAssets(ids){
     for (const p of customAssets) viewer.scene.primitives.remove(p);
     customAssets = [];
@@ -914,7 +1012,7 @@ window.GE = (() => {
     viewer.scene.postProcessStages.fxaa.enabled = true;
     viewer.scene.skyAtmosphere.show = true;
     setBasemap(cfg.basemap || 'esriImagery'); setTerrain(!!cfg.terrain); setBuildings(!!cfg.buildings); loadAssets(cfg.assets);
-    setSensor(cfg.sensor || 'normal'); setHUD(cfg.hud !== false); setRealism(cfg.realism || 'off');
+    setSensor(cfg.sensor || 'normal'); setHUD(cfg.hud !== false); setRealism(cfg.realism || 'off'); setSpaceMode(!!cfg.space);
     bindCtx();
     $('kh').textContent = String(4000 + Math.floor(Math.random()*999)); $('ops').textContent = String(4100 + Math.floor(Math.random()*99));
 
@@ -1277,7 +1375,7 @@ window.GE = (() => {
     viewer.scene.requestRender();
   }
 
-  return { init, setBasemap, setTerrain, setBuildings, loadAssets, setView, setData, home, tilt, setCustomRaster, setCustomTilesets, setSensor, setHUD, setCockpit, setTool, clearTools, setShadows, focus, setTrack, setFollow, setModels, setRealism };
+  return { init, setBasemap, setTerrain, setBuildings, loadAssets, setView, setData, home, tilt, setCustomRaster, setCustomTilesets, setSensor, setHUD, setCockpit, setTool, clearTools, setShadows, focus, setTrack, setFollow, setModels, setRealism, setSpaceMode };
 })();
 window.addEventListener('load', () => post({type:'ready'}));
 window.addEventListener('error', (e) => post({type:'status', text: 'JS: ' + e.message}));
