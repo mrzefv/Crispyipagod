@@ -117,6 +117,9 @@ struct GlobeView: View {
         .fullScreenCover(isPresented: $s.show3D) {
             Scene3DView().environmentObject(s)
         }
+        .fullScreenCover(isPresented: $s.showRealism) {
+            RealismSceneView().environmentObject(s)
+        }
     }
 
     // MARK: Map
@@ -471,36 +474,6 @@ struct GlobeView: View {
             .annotationTitles(.hidden)
         }
 
-        if s.layers.contains(.simulation) {
-            ForEach(s.simulationOverlays) { sim in
-                ForEach(Array(sim.rings.enumerated()), id: \.offset) { ring in
-                    if sim.kind == .abduction {
-                        MapPolygon(coordinates: ring.element)
-                            .foregroundStyle(Color(red: 0.8, green: 1.0, blue: 0.75).opacity(0.12))
-                            .stroke(Color(red: 0.9, green: 1.0, blue: 0.8).opacity(0.65), lineWidth: 1.2)
-                    } else {
-                        MapPolyline(coordinates: ring.element)
-                            .stroke(Color(red: 0.65, green: 1.0, blue: 0.7).opacity(0.8), style: StrokeStyle(lineWidth: 1.6, dash: [4, 3]))
-                    }
-                }
-            }
-            ForEach(s.simulationContacts) { sim in
-                Annotation(sim.title, coordinate: sim.coord, anchor: sim.altM > 0 ? .bottom : .center) {
-                    Button { s.select(Entity.from(sim)) } label: {
-                        ZStack {
-                            Circle().fill(Color.black.opacity(0.45)).frame(width: sim.altM > 0 ? 28 : 22, height: sim.altM > 0 ? 28 : 22)
-                            Circle().stroke(Color(red: 0.65, green: 1.0, blue: 0.7), lineWidth: 1.4).frame(width: sim.altM > 0 ? 28 : 22, height: sim.altM > 0 ? 28 : 22)
-                            Text(sim.kind.icon).font(.system(size: sim.altM > 0 ? 15 : 12))
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(sim.title)
-                    .accessibilityValue(sim.subtitle)
-                }
-                .annotationTitles(s.showLabels && s.distance < 180_000 ? .visible : .hidden)
-            }
-        }
-
         // Night side + aurora
         if s.layers.contains(.space) {
             if s.night.count > 3 {
@@ -678,7 +651,7 @@ struct GlobeView: View {
             GlassButton(icon: s.isLive ? "clock" : "clock.badge.exclamationmark",
                         label: s.isLive ? "Time" : "Replay",
                         active: !s.isLive) { s.openTimeline(at: nil) }
-            GlassButton(icon: "cube.transparent", label: "3D") { s.show3D = true }
+            GlassButton(icon: "cube.transparent", label: "3D") { s.showRealism = true }
             VoiceButton(voice: s.voice)
         }
         .padding(.horizontal, 12)
@@ -884,7 +857,8 @@ struct BottomPanel: View {
                 }
                 HoldAction(icon: "camera.aperture", title: "Modes", active: s.sensor != .normal || s.hud || s.detection, primary: { showModes = true }) {
                     Button { showModes = true } label: { Label("Modes sheet", systemImage: "camera.aperture") }
-                    Button { s.show3D = true } label: { Label("3D scene", systemImage: "cube.transparent") }
+                    Button { s.showRealism = true } label: { Label("Realism 3D", systemImage: "cube.fill") }
+                    Button { s.show3D = true } label: { Label("Intel scene", systemImage: "cube.transparent") }
                     Picker("Sensor", selection: $s.sensor) {
                         ForEach(SensorMode.allCases) { m in Text(m.title).tag(m) }
                     }
@@ -901,15 +875,15 @@ struct BottomPanel: View {
                     Button { if !s.layers.contains(.scanner) { s.layers.insert(.scanner) }; s.showScanner = true } label: { Label("Scanner feeds", systemImage: "antenna.radiowaves.left.and.right") }
                     Button { s.voice.toggle() } label: { Label(s.voice.listening ? "Stop listening" : "Voice command", systemImage: "mic") }
                 }
-                HoldAction(icon: "square.3.layers.3d", title: "Layers", active: s.layers.contains(.radar) || s.layers.contains(.space) || s.layers.contains(.simulation), primary: { showLayers = true }) {
+                HoldAction(icon: "square.3.layers.3d", title: "Layers", active: s.layers.contains(.radar) || s.layers.contains(.space), primary: { showLayers = true }) {
                     Button { showLayers = true } label: { Label("Layers sheet", systemImage: "square.3.layers.3d") }
-                    Button { s.show3D = true } label: { Label("3D scene · Esri / Google / OSM", systemImage: "cube.transparent") }
+                    Button { s.showRealism = true } label: { Label("Realism 3D (native)", systemImage: "cube.fill") }
+                    Button { s.show3D = true } label: { Label("Intel scene · Esri / Google / OSM", systemImage: "cube.transparent") }
                     if !s.propertyLines.isEmpty {
                         Button(role: .destructive) { s.propertyLines = [] } label: { Label("Clear property lines", systemImage: "rectangle.dashed") }
                     }
                     Button { if !s.layers.contains(.radar) { s.layers.insert(.radar) }; s.showRadar = true } label: { Label("Weather radar", systemImage: "cloud.rain") }
                     Button { if !s.layers.contains(.space) { s.layers.insert(.space) }; s.showSpace = true } label: { Label("Space weather", systemImage: "sun.max") }
-                    Button { if !s.layers.contains(.simulation) { s.layers.insert(.simulation) } } label: { Label("Paranormal simulation", systemImage: "sparkles") }
                     Toggle(isOn: layerBinding(.cctv)) { Label("Public CCTV", systemImage: "video") }
                     Toggle(isOn: layerBinding(.flights)) { Label("Flights", systemImage: "airplane") }
                     Toggle(isOn: layerBinding(.ships)) { Label("Ships", systemImage: "ferry") }
@@ -1312,7 +1286,7 @@ struct LayersSheet: View {
                 } header: {
                     Text("Layers")
                 } footer: {
-                    Text("Everything is keyless except AIS ships (free AISStream key in Settings). Paranormal Simulation is fictional and generated on-device. Data may be delayed or incomplete — not for navigation.")
+                    Text("Everything is keyless except AIS ships (free AISStream key in Settings). Data may be delayed or incomplete — not for navigation.")
                 }
             }
             .listStyle(.insetGrouped)
@@ -1351,7 +1325,6 @@ struct LayersSheet: View {
         case .scanner: return "\(s.scanners.count) feeds"
         case .peaks: return s.peaks.isEmpty ? "zoom in (<300 km)" : "\(s.peaks.count) peaks"
         case .residential: return s.distance >= 6_000 ? "zoom in (<6 km)" : "\(s.residential.count) footprints"
-        case .simulation: return "\(s.simulationContacts.count) scripted events"
         }
     }
 }

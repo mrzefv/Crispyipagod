@@ -53,23 +53,41 @@ def tree_mesh(kind):
         crown = trimesh.creation.icosphere(subdivisions=1, radius=3.0).apply_translation([0, 0, 6])
         cols = [(95, 65, 40), (55, 125, 55)]
     for m, c in zip((trunk, crown), cols): m.visual.vertex_colors = np.tile(np.array(list(c) + [255], dtype=np.uint8), (len(m.vertices), 1))
-    return trimesh.util.concatenate([trunk, crown])   # z-up ENU
+    trunk.metadata["part"] = "trunk"; crown.metadata["part"] = "crown"
+    return (trunk, crown)   # z-up ENU
 proto = {k: tree_mesh(k) for k in ("conifer", "broadleaf")}
 tiles = {}
 for x, y, kind, s in trees:
     key = (int(math.floor(x / a.tile_m)), int(math.floor(y / a.tile_m)))
-    m = proto[kind].copy(); m.apply_scale(s); m.apply_transform(trimesh.transformations.rotation_matrix(rng.uniform(0, 6.28), [0, 0, 1])); m.apply_translation([x, y, 0])
-    jitter = rng.integers(-18, 18); m.visual.vertex_colors = np.clip(m.visual.vertex_colors.astype(int) + [0, jitter, 0, 0], 0, 255).astype(np.uint8)
-    tiles.setdefault(key, []).append(m)
+    rot = trimesh.transformations.rotation_matrix(rng.uniform(0, 6.28), [0, 0, 1]); jitter = int(rng.integers(-18, 18))
+    for part in proto[kind]:
+        m = part.copy(); m.apply_scale(s); m.apply_transform(rot); m.apply_translation([x, y, 0])
+        m.visual.vertex_colors = np.clip(m.visual.vertex_colors.astype(int) + [0, jitter, 0, 0], 0, 255).astype(np.uint8)
+        tiles.setdefault(key, {}).setdefault(part.metadata["part"], []).append(m)
 out = f"site/{a.name}/trees"; os.makedirs(out, exist_ok=True)
 children = []
-for (i, j), ms in tiles.items():
+for (i, j), parts in tiles.items():
+    ms = parts.get("trunk", []) + parts.get("crown", [])
     m = trimesh.util.concatenate(ms); v = m.vertices.copy(); m.vertices = np.column_stack([v[:, 0], v[:, 2], -v[:, 1]])
     fn = f"t_{i}_{j}.glb"; m.export(os.path.join(out, fn))
+    # OBJ twin: trunk / crown materials, one group per tree so the native viewer can drop each onto the terrain
+    stem = fn[:-4]
+    with open(os.path.join(out, stem + ".mtl"), "w") as f: f.write("newmtl trunk\nKd 0.37 0.25 0.15\nnewmtl crown\nKd 0.22 0.49 0.22\n")
+    vo = 0
+    with open(os.path.join(out, stem + ".obj"), "w") as f:
+        f.write(f"mtllib {stem}.mtl\n")
+        for part in ("trunk", "crown"):
+            for k, pm in enumerate(parts.get(part, [])):
+                pv = pm.vertices
+                f.write(f"g t{k}_{part}\nusemtl {part}\n")
+                f.write("".join(f"v {x:.2f} {z:.2f} {-y:.2f}\n" for x, y, z in pv))
+                f.write("".join(f"f {a1+vo+1} {b1+vo+1} {c1+vo+1}\n" for a1, b1, c1 in pm.faces))
+                vo += len(pv)
     children.append({"boundingVolume": {"box": [i * a.tile_m + a.tile_m / 2, j * a.tile_m + a.tile_m / 2, 6, a.tile_m / 2, 0, 0, 0, a.tile_m / 2, 0, 0, 0, 7]}, "geometricError": 0, "content": {"uri": fn}})
 half = a.radius_km * 1000 + a.tile_m
 json.dump({"asset": {"version": "1.1", "generator": "godseye-tiles trees.py"}, "geometricError": 500,
            "root": {"transform": enu_to_ecef_matrix(lat0, lon0, 0.0), "boundingVolume": {"box": [0, 0, 6, half, 0, 0, 0, half, 0, 0, 0, 7]}, "geometricError": 80, "refine": "ADD", "children": children}},
           open(os.path.join(out, "tileset.json"), "w"))
-write_meta(out, {"kind": "tileset", "name": f"{a.name} · vegetation", "url": "tileset.json", "bbox": bbox, "tiles": len(children), "trees": len(trees), "credit": "© OpenStreetMap contributors · MRzefv"})
+write_meta(out, {"kind": "tileset", "name": f"{a.name} · vegetation", "url": "tileset.json", "bbox": bbox, "tiles": len(children), "trees": len(trees),
+                 "center": [lat0, lon0], "tileM": a.tile_m, "half": a.radius_km * 1000, "credit": "© OpenStreetMap contributors · MRzefv"})
 print("done", out, len(children), "tiles")

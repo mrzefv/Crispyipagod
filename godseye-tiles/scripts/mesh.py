@@ -88,6 +88,15 @@ if naip:
     tex_ok = True
 tex = Image.open("work/tex.jpg").convert("RGB") if tex_ok else Image.new("RGB", (W, H), (110, 120, 90))
 
+# ---------- 2b. coarse ground grid (DTM-ish via minimum filter) for placing buildings/trees in the native viewer ----------
+gcell = 10
+gmin = ndimage.minimum_filter(dsm, size=int(max(3, 16 / a.cell)))
+gs = int(gcell / a.cell)
+ground = gmin[::gs, ::gs]
+os.makedirs(f"site/{a.name}/mesh", exist_ok=True)
+json.dump({"cell": gcell, "half": half, "rows": int(ground.shape[0]), "cols": int(ground.shape[1]), "z": [[round(float(v), 2) for v in row] for row in ground]},
+          open(f"site/{a.name}/mesh/ground.json", "w"))
+
 # ---------- 3. mesh tiles ----------
 out = f"site/{a.name}/mesh"; os.makedirs(out, exist_ok=True)
 step = int(max(1, round(a.tile_m / a.cell)))

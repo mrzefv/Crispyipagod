@@ -131,7 +131,10 @@ def height_of(t):
 
 # ---------------- geometry ----------------
 tiles = {}
-def add_mesh(key, style, m): tiles.setdefault(key, {}).setdefault(style, []).append(m)
+BID = [0]
+def add_mesh(key, style, m):
+    m.metadata["bid"] = BID[0]
+    tiles.setdefault(key, {}).setdefault(style, []).append(m)
 
 def walls(poly, h, style, key):
     rings = [list(poly.exterior.coords)] + [list(i.coords) for i in poly.interiors]
@@ -191,6 +194,7 @@ def add(outer, holes, tags):
         if pp.area < 4: continue
         pp = pp if pp.exterior.is_ccw else Polygon(list(pp.exterior.coords)[::-1], [list(i.coords) for i in pp.interiors])
         key = (int(math.floor(pp.centroid.x / a.tile_m)), int(math.floor(pp.centroid.y / a.tile_m)))
+        BID[0] += 1
         style = style_of(tags, h, pp.area)
         walls(pp, h, style, key)
         rs = (tags.get("roof:shape") or "").lower()
@@ -210,7 +214,29 @@ for e in els:
 # ---------------- export ----------------
 out = f"site/{a.name}/buildings"; os.makedirs(out, exist_ok=True)
 children = []
+def write_textures():
+    for style, mat in STYLES.items():
+        mat.baseColorTexture.save(os.path.join(out, f"tex_{style}.png"))
+        if mat.emissiveTexture is not None: mat.emissiveTexture.save(os.path.join(out, f"tex_{style}_em.png"))
+def write_obj(stem, by_style):
+    # per-building groups so the native viewer can drop each one onto the terrain
+    with open(os.path.join(out, stem + ".mtl"), "w") as f:
+        for style in by_style:
+            f.write(f"newmtl {style}\nKd 1 1 1\nKa 1 1 1\nKs 0 0 0\nmap_Kd tex_{style}.png\n")
+            if not style.startswith("roof_"): f.write(f"map_Ke tex_{style}_em.png\n")
+    vo = 0
+    with open(os.path.join(out, stem + ".obj"), "w") as f:
+        f.write(f"mtllib {stem}.mtl\n")
+        for style, ms in by_style.items():
+            for m in ms:
+                v = m.vertices; uv = m.visual.uv if m.visual.uv is not None else np.zeros((len(v), 2))
+                f.write(f"g b{m.metadata.get('bid', 0)}_{style}\nusemtl {style}\n")
+                f.write("".join(f"v {x:.3f} {z:.3f} {-y:.3f}\n" for x, y, z in v))
+                f.write("".join(f"vt {u:.4f} {1.0 - w:.4f}\n" for u, w in uv))
+                f.write("".join(f"f {a1+vo+1}/{a1+vo+1} {b1+vo+1}/{b1+vo+1} {c1+vo+1}/{c1+vo+1}\n" for a1, b1, c1 in m.faces))
+                vo += len(v)
 for (i, j), by_style in tiles.items():
+    write_obj(f"b_{i}_{j}", by_style)
     scene = trimesh.Scene(); zmax = 1.0
     for style, ms in by_style.items():
         m = trimesh.util.concatenate(ms)
@@ -226,5 +252,7 @@ half = a.radius_km * 1000 + a.tile_m
 tileset = {"asset": {"version": "1.1", "generator": "godseye-tiles buildings.py v2 (PBR)"}, "geometricError": 800,
            "root": {"transform": enu_to_ecef_matrix(lat0, lon0, 0.0), "boundingVolume": {"box": [0, 0, 40, half, 0, 0, 0, half, 0, 0, 0, 40]}, "geometricError": 200, "refine": "ADD", "children": children}}
 json.dump(tileset, open(os.path.join(out, "tileset.json"), "w"))
-write_meta(out, {"kind": "tileset", "name": f"{a.name} · buildings (PBR)", "url": "tileset.json", "bbox": bbox, "tiles": len(children), "credit": "© OpenStreetMap contributors · MRzefv"})
+write_textures()
+write_meta(out, {"kind": "tileset", "name": f"{a.name} · buildings (PBR)", "url": "tileset.json", "bbox": bbox, "tiles": len(children),
+                 "center": [lat0, lon0], "tileM": a.tile_m, "half": a.radius_km * 1000, "credit": "© OpenStreetMap contributors · MRzefv"})
 print("done", out, len(children), "tiles")
