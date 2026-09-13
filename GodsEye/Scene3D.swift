@@ -428,9 +428,10 @@ struct Scene3DView: View {
         var sel: [String: Any] = [:]
         if let e = selected { sel = ["lat": e.lat, "lon": e.lon, "title": e.title, "kind": e.kind.rawValue] }
         let track = trackPayload()
+        let passToken = s.layers.contains(.simulation) ? (s.simulationTick % 10_000) : Int((s.lastUpdate?.timeIntervalSince1970 ?? 0) / 15) % 10_000
         let payload: [String: Any] = ["entities": items, "polys": polys, "selected": sel, "track": track,
                                       "counts": ["ac": s.contacts.count + s.militaryContacts.count, "sh": s.ships.count, "sat": s.satellites.count, "cam": s.cameras.count],
-                                      "orb": s.satellites.count, "pass": Int((s.lastUpdate?.timeIntervalSince1970 ?? 0) / 15) % 10000]
+                                      "orb": s.satellites.count, "pass": passToken]
         guard let d = try? JSONSerialization.data(withJSONObject: payload), let js = String(data: d, encoding: .utf8) else { return }
         if !force, js == lastEntityPayload { return }
         lastEntityPayload = js
