@@ -128,6 +128,10 @@ struct Scene3DView: View {
             guard ready else { return }
             bridge.eval("GE.setSpaceMode(\(on))")
         }
+        .onChange(of: ready) { _, isReady in
+            guard isReady else { return }
+            bridge.eval("GE.setSpaceMode(\(s.layers.contains(.space)))")
+        }
         .onChange(of: s.trackedID) { _, _ in pushEntities() }
         .onChange(of: selected) { _, _ in pushEntities() }
         .onDisappear { pushTimer?.invalidate(); pushTimer = nil; trackTimer?.invalidate(); trackTimer = nil }
@@ -766,7 +770,7 @@ const SHIP_GLB = 'data:model/gltf-binary;base64,Z2xURgIAAACYBgAATAMAAEpTT057InNj
 window.GE = (() => {
   let viewer, tileset = null, buildings = null, customAssets = [], stage = null, cfg = {}, hudOn = true, sensor = 'normal', spaceMode = false;
   let spaceFX = [];
-  let buildingReq = { token: 0, on: false };
+  let buildingReq = { token: 0, on: false, loading: false };
   let customTs = new Map(), lastData = null, cockpit = false, camImgs = new Map(), t0 = Date.now();
   const rasterCredit = { esriImagery:'ESRI', esriHybrid:'ESRI', esriStreets:'ESRI', osm:'OSM', google3D:'GOOGLE 3D', bingAerial:'BING', bingHybrid:'BING', custom:'MRZEFV' };
 
@@ -922,20 +926,27 @@ window.GE = (() => {
   }
   async function setBuildings(on){
     if (!viewer) return;
+    const want = !!on;
+    if (want === buildingReq.on && (buildingReq.loading || buildings || !want)) return;
     const req = ++buildingReq.token;
-    buildingReq.on = !!on;
+    buildingReq.on = want;
+    buildingReq.loading = want;
     if (buildings) { viewer.scene.primitives.remove(buildings); buildings = null; }
-    if (on && TOKEN) {
+    if (want && TOKEN) {
       try {
         const next = await Cesium.createOsmBuildingsAsync();
         if (req !== buildingReq.token || !buildingReq.on) return;
+        buildingReq.loading = false;
         buildings = next;
         viewer.scene.primitives.add(buildings);
         applyBuildingStyle();
       } catch(e){
         if (req !== buildingReq.token || !buildingReq.on) return;
+        buildingReq.loading = false;
         status('OSM BUILDINGS: ' + (e.message||e));
       }
+    } else {
+      buildingReq.loading = false;
     }
     viewer.scene.requestRender();
   }
