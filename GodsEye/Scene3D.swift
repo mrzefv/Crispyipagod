@@ -126,11 +126,11 @@ struct Scene3DView: View {
         .onChange(of: s.propertyLines) { _, _ in pushEntities() }
         .onChange(of: s.layers.contains(.space)) { _, on in
             guard ready else { return }
-            bridge.eval("GE.setSpaceMode(\(on))")
+            bridge.eval("GE.setSpaceMode(\(jsBool(on)))")
         }
         .onChange(of: ready) { _, isReady in
             guard isReady else { return }
-            bridge.eval("GE.setSpaceMode(\(s.layers.contains(.space)))")
+            bridge.eval("GE.setSpaceMode(\(jsBool(s.layers.contains(.space))))")
         }
         .onChange(of: s.trackedID) { _, _ in pushEntities() }
         .onChange(of: selected) { _, _ in pushEntities() }
@@ -238,6 +238,8 @@ struct Scene3DView: View {
             .background(Circle().fill(.ultraThinMaterial))
     }
 
+    private func jsBool(_ value: Bool) -> String { value ? "true" : "false" }
+
     private func pill(_ title: String, icon: String, active: Bool, tint: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: 5) {
@@ -261,7 +263,7 @@ struct Scene3DView: View {
             status = "\(s.basemap.title) · tap to inspect"
             let assets = s.ionAssets.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
             let gkey = (s.googleMapsKey.isEmpty ? CesiumConfig.defaultGoogleKey : s.googleMapsKey).replacingOccurrences(of: "'", with: "")
-            bridge.eval("GE.init({basemap:'\(s.basemap.rawValue)', terrain:\(s.sceneTerrain), buildings:\(s.sceneBuildings), assets:\(assets), sensor:'\(s.sensor.rawValue)', hud:\(s.hud), accent:'\(s.accentHex)', googleKey:'\(gkey)', realism:'\(s.sceneRealism)', space:\(s.layers.contains(.space))})")
+            bridge.eval("GE.init({basemap:'\(s.basemap.rawValue)', terrain:\(s.sceneTerrain), buildings:\(s.sceneBuildings), assets:\(assets), sensor:'\(s.sensor.rawValue)', hud:\(s.hud), accent:'\(s.accentHex)', googleKey:'\(gkey)', realism:'\(s.sceneRealism)', space:\(jsBool(s.layers.contains(.space)))})")
             let h = max(s.distance, 300)
             bridge.eval(String(format: "GE.setView(%.6f,%.6f,%.1f,%.2f,%.2f)", s.center.latitude, s.center.longitude, h, s.heading, s.pitch))
             pushEntities()
@@ -927,26 +929,35 @@ window.GE = (() => {
   async function setBuildings(on){
     if (!viewer) return;
     const want = !!on;
-    if (want === buildingReq.on && (buildingReq.loading || buildings || !want)) return;
-    const req = ++buildingReq.token;
-    buildingReq.on = want;
-    buildingReq.loading = want;
-    if (buildings) { viewer.scene.primitives.remove(buildings); buildings = null; }
-    if (want && TOKEN) {
-      try {
-        const next = await Cesium.createOsmBuildingsAsync();
-        if (req !== buildingReq.token || !buildingReq.on) return;
-        buildingReq.loading = false;
-        buildings = next;
-        viewer.scene.primitives.add(buildings);
-        applyBuildingStyle();
-      } catch(e){
-        if (req !== buildingReq.token || !buildingReq.on) return;
-        buildingReq.loading = false;
-        status('OSM BUILDINGS: ' + (e.message||e));
-      }
-    } else {
+    if (!want) {
+      buildingReq.token++;
+      buildingReq.on = false;
       buildingReq.loading = false;
+      if (buildings) { viewer.scene.primitives.remove(buildings); buildings = null; }
+      viewer.scene.requestRender();
+      return;
+    }
+    if (buildingReq.on && (buildingReq.loading || buildings)) return;
+    const req = ++buildingReq.token;
+    buildingReq.on = true;
+    buildingReq.loading = true;
+    if (buildings) { viewer.scene.primitives.remove(buildings); buildings = null; }
+    if (!TOKEN) {
+      buildingReq.loading = false;
+      viewer.scene.requestRender();
+      return;
+    }
+    try {
+      const next = await Cesium.createOsmBuildingsAsync();
+      if (req !== buildingReq.token || !buildingReq.on) return;
+      buildingReq.loading = false;
+      buildings = next;
+      viewer.scene.primitives.add(buildings);
+      applyBuildingStyle();
+    } catch(e){
+      if (req !== buildingReq.token || !buildingReq.on) return;
+      buildingReq.loading = false;
+      status('OSM BUILDINGS: ' + (e.message||e));
     }
     viewer.scene.requestRender();
   }
